@@ -1,6 +1,7 @@
 /.phpunit.cache
 /bootstrap/ssr
 /node_modules
+/.adviser-build
 /public/hot
 /public/storage
 /storage/*.key
@@ -9,6 +10,8 @@
 .env
 .env.backup
 .env.production
+.env.*
+!.env.example
 .phpactor.json
 .phpunit.result.cache
 Homestead.json

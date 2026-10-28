@@ -7,8 +7,10 @@ use Illuminate\Database\Eloquent\Model;
 class Notification extends Model
 {
     protected $fillable = [
-        'user_id', 'type', 'title', 'message', 'link', 'read'
+        'user_id', 'type', 'title', 'message', 'link', 'read', 'event_key', 'defense_request_id',
     ];
+
+    protected $casts = ['read' => 'boolean'];
 
     public function user()
     {

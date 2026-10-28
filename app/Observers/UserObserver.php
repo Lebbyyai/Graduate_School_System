@@ -1,10 +1,9 @@
 <?php
 
-
 namespace App\Observers;
 
-use App\Models\User;
 use App\Models\Adviser;
+use App\Models\User;
 
 class UserObserver
 {
@@ -23,8 +22,8 @@ class UserObserver
 
     protected function syncAdviserWithUser(User $user): void
     {
-        // Only sync for adviser/faculty roles
-        if (! in_array($user->role, ['Adviser', 'Faculty'])) {
+        // Only sync for adviser roles
+        if (! in_array($user->role, ['Adviser'])) {
             return;
         }
 

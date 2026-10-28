@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Support\Facades\Event;
+
 test('registration screen can be rendered', function () {
     $response = $this->get('/register');
 
@@ -8,12 +10,12 @@ test('registration screen can be rendered', function () {
 
 test('new users can register', function () {
 
-    \Illuminate\Support\Facades\Event::fake();
+    Event::fake();
 
     $response = $this->post('/register', [
         'first_name' => 'Test',
         'middle_name' => 'Mid',
-        'last_name' => 'User',   
+        'last_name' => 'User',
         'email' => 'test@example.com',
         'password' => 'password',
         'password_confirmation' => 'password',
@@ -21,6 +23,6 @@ test('new users can register', function () {
         'role' => 'Student',
     ]);
 
-    $this->assertAuthenticated(); 
-    $response->assertRedirect(route('dashboard', absolute: false)); 
+    $this->assertAuthenticated();
+    $response->assertRedirect(route('dashboard', absolute: false));
 });

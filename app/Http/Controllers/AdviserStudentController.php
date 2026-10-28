@@ -2,17 +2,22 @@
 
 namespace App\Http\Controllers;
 
+use App\Mail\StudentAcceptedByAdviser;
+use App\Mail\StudentRejectedByAdviser;
 use App\Models\User;
+use App\Services\AdviserAssignmentNotifications;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
-use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Validation\Rule;
 
 class AdviserStudentController extends Controller
 {
     // Return accepted students only
     public function index(Request $request)
     {
+        abort_unless($request->user()?->role === 'Adviser', 403);
         $adviser = $request->user();
         $students = $adviser->advisedStudents()
             ->wherePivot('status', 'accepted')
@@ -24,12 +29,13 @@ class AdviserStudentController extends Controller
                     $coordinator = User::find($s->pivot->requested_by);
                     if ($coordinator) {
                         $coordinatorName = trim(
-                            $coordinator->first_name . ' ' .
-                            ($coordinator->middle_name ? strtoupper($coordinator->middle_name[0]) . '. ' : '') .
+                            $coordinator->first_name.' '.
+                            ($coordinator->middle_name ? strtoupper($coordinator->middle_name[0]).'. ' : '').
                             $coordinator->last_name
                         );
                     }
                 }
+
                 return [
                     'id' => $s->id,
                     'student_number' => $s->student_number ?? null,
@@ -48,6 +54,7 @@ class AdviserStudentController extends Controller
     // Return pending assignments (adviser view)
     public function pending(Request $request)
     {
+        abort_unless($request->user()?->role === 'Adviser', 403);
         $adviser = $request->user();
         $students = $adviser->advisedStudents()
             ->wherePivot('status', 'pending')
@@ -59,12 +66,13 @@ class AdviserStudentController extends Controller
                     $coordinator = User::find($s->pivot->requested_by);
                     if ($coordinator) {
                         $coordinatorName = trim(
-                            $coordinator->first_name . ' ' .
-                            ($coordinator->middle_name ? strtoupper($coordinator->middle_name[0]) . '. ' : '') .
+                            $coordinator->first_name.' '.
+                            ($coordinator->middle_name ? strtoupper($coordinator->middle_name[0]).'. ' : '').
                             $coordinator->last_name
                         );
                     }
                 }
+
                 return [
                     'id' => $s->id,
                     'student_number' => $s->student_number ?? null,
@@ -85,72 +93,82 @@ class AdviserStudentController extends Controller
     // Adviser accepts a pending student
     public function acceptPending(Request $request, $studentId)
     {
+        abort_unless($request->user()?->role === 'Adviser', 403);
+        $request->validate(['send_email' => 'sometimes|boolean']);
+
         $adviser = $request->user();
 
-        if (! $adviser->advisedStudents()->wherePivot('student_id', $studentId)->exists()) {
+        if (! $adviser->advisedStudents()->wherePivot('student_id', $studentId)->wherePivot('status', 'pending')->exists()) {
             return response()->json(['error' => 'Pending assignment not found.'], 404);
         }
 
+        $pendingStudent = $adviser->advisedStudents()->whereKey($studentId)->firstOrFail();
         $adviser->advisedStudents()->updateExistingPivot($studentId, ['status' => 'accepted']);
-        
+        app(AdviserAssignmentNotifications::class)->decided($adviser, $pendingStudent, 'accepted', $pendingStudent->pivot->requested_by);
+
         // Send welcome email to student
         try {
             $student = User::find($studentId);
-            if ($student && $student->email) {
+            if ($request->boolean('send_email') && $student && $student->email) {
                 Mail::to($student->email)
-                    ->send(new \App\Mail\StudentAcceptedByAdviser($student, $adviser));
-                
+                    ->send(new StudentAcceptedByAdviser($student, $adviser));
+
                 Log::info('Student Acceptance: Welcome email sent to student', [
                     'student_id' => $student->id,
                     'student_email' => $student->email,
                     'adviser_id' => $adviser->id,
-                    'adviser_name' => trim(($adviser->first_name ?? '') . ' ' . ($adviser->last_name ?? ''))
+                    'adviser_name' => trim(($adviser->first_name ?? '').' '.($adviser->last_name ?? '')),
                 ]);
             }
         } catch (\Exception $e) {
             Log::error('Student Acceptance: Failed to send welcome email to student', [
                 'student_id' => $studentId,
                 'adviser_id' => $adviser->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
             // Don't fail the acceptance if email fails
         }
-        
+
         return response()->json(['success' => true]);
     }
 
     // Adviser rejects a pending student (marks rejected and sends email)
     public function rejectPending(Request $request, $studentId)
     {
+        abort_unless($request->user()?->role === 'Adviser', 403);
+        $request->validate(['send_email' => 'sometimes|boolean']);
+
         $adviser = $request->user();
 
-        if (! $adviser->advisedStudents()->wherePivot('student_id', $studentId)->exists()) {
+        if (! $adviser->advisedStudents()->wherePivot('student_id', $studentId)->wherePivot('status', 'pending')->exists()) {
             return response()->json(['error' => 'Pending assignment not found.'], 404);
         }
 
         // Mark as rejected (do NOT delete)
+        $pendingStudent = $adviser->advisedStudents()->whereKey($studentId)->firstOrFail();
         $adviser->advisedStudents()->updateExistingPivot($studentId, ['status' => 'rejected']);
-        
+        app(AdviserAssignmentNotifications::class)->decided($adviser, $pendingStudent, 'rejected', $pendingStudent->pivot->requested_by);
+
         // Send rejection email to student
         try {
             $student = User::find($studentId);
-            if ($student && $student->email) {
+            if ($request->boolean('send_email') && $student && $student->email) {
                 // Get the pivot data to find who assigned this student
                 $pivotStudent = $adviser->advisedStudents()->wherePivot('student_id', $studentId)->first();
                 $coordinatorId = $pivotStudent->pivot->requested_by ?? null;
-                
+
                 if ($coordinatorId) {
                     $coordinator = User::find($coordinatorId);
                     if ($coordinator) {
                         Mail::to($student->email)
-                            ->send(new \App\Mail\StudentRejectedByAdviser($student, $adviser, $coordinator));
-                        
+                            ->send(new StudentRejectedByAdviser($student, $adviser, $coordinator));
+
                         Log::info('Student Rejection: Email sent to student', [
                             'student_id' => $student->id,
                             'student_email' => $student->email,
                             'adviser_id' => $adviser->id,
-                            'adviser_name' => trim(($adviser->first_name ?? '') . ' ' . ($adviser->last_name ?? '')),
-                            'coordinator_id' => $coordinator->id
+                            'adviser_name' => trim(($adviser->first_name ?? '').' '.($adviser->last_name ?? '')),
+                            'coordinator_id' => $coordinator->id,
                         ]);
                     }
                 }
@@ -159,65 +177,84 @@ class AdviserStudentController extends Controller
             Log::error('Student Rejection: Failed to send email to student', [
                 'student_id' => $studentId,
                 'adviser_id' => $adviser->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
             // Don't fail the rejection if email fails
         }
-        
+
         return response()->json(['success' => true]);
     }
 
     // Direct attach by adviser (manual register)
     public function store(Request $request)
     {
+        abort_unless($request->user()?->role === 'Adviser', 403);
         $request->validate([
-            'student_id' => 'required|integer|exists:users,id'
+            'student_id' => ['required', 'integer', Rule::exists('users', 'id')->where('role', 'Student')],
         ]);
 
         $adviser = $request->user();
         $studentId = $request->input('student_id');
 
-        if ($adviser->advisedStudents()->where('student_id', $studentId)->exists()) {
-            return response()->json(['error' => 'Student is already registered with this adviser.'], 409);
-        }
+        return DB::transaction(function () use ($adviser, $studentId) {
+            $student = User::whereKey($studentId)->lockForUpdate()->firstOrFail();
+            if ($student->advisers()->wherePivotIn('status', ['accepted', 'pending'])->exists()) {
+                return response()->json(['error' => 'This student already has an accepted or pending adviser assignment.'], 409);
+            }
+            $adviser->advisedStudents()->syncWithoutDetaching([$studentId => ['status' => 'accepted']]);
 
-        $adviser->advisedStudents()->attach($studentId, ['status' => 'accepted']);
-        return response()->json(['success' => true]);
+            return response()->json(['success' => true]);
+        });
     }
 
     public function destroy(Request $request, $studentId)
     {
+        abort_unless($request->user()?->role === 'Adviser', 403);
         $adviser = $request->user();
         $adviser->advisedStudents()->detach($studentId);
+
         return response()->json(['success' => true]);
     }
 
     public function getAdviserCode(Request $request)
     {
+        abort_unless($request->user()?->role === 'Adviser', 403);
         $adviser = $request->user();
-        if (!$adviser->adviser_code) {
+        if (! $adviser->adviser_code) {
             $adviser->generateAdviserCode();
         }
+
         return response()->json(['adviser_code' => $adviser->adviser_code]);
     }
 
     public function registerWithCode(Request $request)
     {
         $student = $request->user();
-        $code = $request->input('adviser_code');
-        $adviser = User::where('adviser_code', $code)->first();
-        if (!$adviser) {
+        abort_unless($student?->role === 'Student', 403);
+        $data = $request->validate(['adviser_code' => 'required|string|max:255']);
+        $adviser = User::where('role', 'Adviser')->where('adviser_code', $data['adviser_code'])->first();
+        if (! $adviser) {
             return response()->json(['error' => 'Invalid code'], 404);
         }
-        if ($adviser->advisedStudents()->where('student_id', $student->id)->exists()) {
-            return response()->json(['error' => 'You are already registered with this adviser.'], 409);
+        $status = DB::table('adviser_settings')->where('adviser_id', $adviser->id)->value('auto_accept_students') ? 'accepted' : 'pending';
+        $registered = DB::transaction(function () use ($student, $adviser, $status) {
+            User::whereKey($student->id)->lockForUpdate()->firstOrFail();
+            if ($student->advisers()->wherePivotIn('status', ['accepted', 'pending'])->exists()) {
+                return false;
+            }
+            $adviser->advisedStudents()->syncWithoutDetaching([$student->id => ['status' => $status, 'requested_by' => null]]);
+            if ($status === 'pending') {
+                $assigned = $adviser->advisedStudents()->whereKey($student->id)->firstOrFail();
+                app(AdviserAssignmentNotifications::class)->pending($adviser, $student, (string) $assigned->pivot->updated_at);
+            }
+
+            return true;
+        });
+        if (! $registered) {
+            return response()->json(['error' => 'You already have an accepted or pending adviser assignment.'], 409);
         }
-        try {
-            $adviser->advisedStudents()->attach($student->id, ['status' => 'accepted']);
-        } catch (\Exception $e) {
-            return response()->json(['error' => $e->getMessage() ?? "Registration failed."], 500);
-        }
-        return response()->json(['success' => true]);
+
+        return response()->json(['success' => true, 'status' => $status]);
     }
 
     public function hasStudents(Request $request)
@@ -225,6 +262,7 @@ class AdviserStudentController extends Controller
         $user = $request->user();
         // Count all students where this user is the adviser, regardless of role
         $count = $user->advisedStudents()->count();
+
         return response()->json(['hasStudents' => $count > 0]);
     }
 }

@@ -32,7 +32,6 @@ export function Stepper({
       <div className="w-full overflow-x-auto mb-4 p-2 flex-shrink-0">
         <div className="min-w-fit flex items-center gap-2">
           {steps.map((_, i) => {
-            const done = i < currentStep;
             const active = i === currentStep;
             return (
               <Fragment key={i}>
@@ -87,7 +86,7 @@ export function Stepper({
       </div>
 
       {/* nav buttons */}
-      <div className="sticky bottom-0 bg-white pt-4 pb-2 px-3 flex justify-end gap-2 border-t border-gray-200">
+      <div className="sticky bottom-0 bg-background text-foreground pt-4 pb-2 px-3 flex justify-end gap-2 border-t border-border">
         <Button variant="ghost" onClick={onPrev} disabled={currentStep === 0 || loading}>
           Previous
         </Button>

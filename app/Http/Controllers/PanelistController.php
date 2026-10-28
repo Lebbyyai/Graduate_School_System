@@ -2,16 +2,21 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\User;
+use App\Helpers\ProgramLevel;
+use App\Models\DefenseRequest;
 use App\Models\Panelist;
 use App\Models\PaymentRate;
-use App\Models\DefenseRequest;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
-use App\Helpers\ProgramLevel;
 
 class PanelistController extends Controller
 {
+    private function authorizeManagement(): void
+    {
+        abort_unless(in_array(auth()->user()?->role, ['Coordinator', 'Administrative Assistant', 'Dean', 'Super Admin']), 403);
+    }
+
     public function index()
     {
         return response()->json(Panelist::all());
@@ -19,6 +24,7 @@ class PanelistController extends Controller
 
     public function store(Request $request)
     {
+        $this->authorizeManagement();
         $panelist = Panelist::create($request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:panelists,email',
@@ -36,10 +42,11 @@ class PanelistController extends Controller
 
     public function update(Request $request, $id)
     {
+        $this->authorizeManagement();
         $panelist = Panelist::findOrFail($id);
         $panelist->update($request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:panelists,email,' . $id,
+            'email' => 'required|email|unique:panelists,email,'.$id,
             'role' => 'required|in:Chairperson,Panel Member',
             'status' => 'required|in:Assigned,Not Assigned',
         ]));
@@ -49,22 +56,27 @@ class PanelistController extends Controller
 
     public function destroy($id)
     {
+        $this->authorizeManagement();
         Panelist::findOrFail($id)->delete();
+
         return redirect()->route('panelists.view');
     }
 
     public function bulkDelete(Request $request)
     {
+        $this->authorizeManagement();
         $request->validate([
             'ids' => 'required|array',
             'ids.*' => 'integer',
         ]);
         Panelist::whereIn('id', $request->ids)->delete();
+
         return redirect()->route('panelists.view');
     }
 
     public function bulkUpdateStatus(Request $request)
     {
+        $this->authorizeManagement();
         $request->validate([
             'ids' => 'required|array',
             'ids.*' => 'integer',
@@ -73,6 +85,7 @@ class PanelistController extends Controller
         Panelist::whereIn('id', $request->ids)->update([
             'status' => $request->status,
         ]);
+
         return redirect()->route('panelists.view');
     }
 
@@ -82,28 +95,28 @@ class PanelistController extends Controller
         $rates = PaymentRate::all()->map(function ($r) {
             return [
                 'program_level' => strtolower(trim($r->program_level)), // masteral | doctorate
-                'type'          => strtolower(trim($r->type)),          // chairperson | panel member
-                'defense_type'  => strtolower($this->normalizeDefenseType($r->defense_type)), // proposal | prefinal | final
-                'amount'        => is_numeric($r->amount) ? (float) $r->amount : $r->amount,
+                'type' => strtolower(trim($r->type)),          // chairperson | panel member
+                'defense_type' => strtolower($this->normalizeDefenseType($r->defense_type)), // proposal | prefinal | final
+                'amount' => is_numeric($r->amount) ? (float) $r->amount : $r->amount,
             ];
         });
 
         $panelists = Panelist::orderBy('name')->get()->map(function ($panelist) use ($rates) {
             $panelistName = strtolower(trim($panelist->name));
-            $panelistId   = $panelist->id;
+            $panelistId = $panelist->id;
 
             // Find defenses where this panelist is chair or member (support id or stored name)
             $defenses = DefenseRequest::where(function ($q) use ($panelistId, $panelistName) {
-                $fields = ['defense_chairperson','defense_panelist1','defense_panelist2','defense_panelist3','defense_panelist4'];
+                $fields = ['defense_chairperson', 'defense_panelist1', 'defense_panelist2', 'defense_panelist3', 'defense_panelist4'];
                 foreach ($fields as $field) {
                     $q->orWhere(function ($qq) use ($field, $panelistId, $panelistName) {
                         $qq->where($field, $panelistId)
-                           ->orWhereRaw("LOWER(CAST($field as CHAR)) = ?", [$panelistName]);
+                            ->orWhereRaw("LOWER(CAST($field as CHAR)) = ?", [$panelistName]);
                     });
                 }
             })->get([
-                'id','program','defense_type','thesis_title',
-                'defense_chairperson','defense_panelist1','defense_panelist2','defense_panelist3','defense_panelist4'
+                'id', 'program', 'defense_type', 'thesis_title',
+                'defense_chairperson', 'defense_panelist1', 'defense_panelist2', 'defense_panelist3', 'defense_panelist4',
             ]);
 
             $assignmentDetails = [];
@@ -117,15 +130,15 @@ class PanelistController extends Controller
                 ) {
                     $role = 'Chairperson';
                 } else {
-                    foreach (['defense_panelist1','defense_panelist2','defense_panelist3','defense_panelist4'] as $field) {
-                        if ($d->$field == $panelistId || (is_string($d->$field) && strtolower(trim($d->$field)) === $panelistName)) {
+                    foreach (['defense_panelist1', 'defense_panelist2', 'defense_panelist3', 'defense_panelist4'] as $field) {
+                        if ($panelistId == $d->$field || (is_string($d->$field) && strtolower(trim($d->$field)) === $panelistName)) {
                             $role = 'Panel Member';
                             break;
                         }
                     }
                 }
 
-                if (!$role) {
+                if (! $role) {
                     continue;
                 }
 
@@ -147,13 +160,13 @@ class PanelistController extends Controller
                 });
 
                 $assignmentDetails[] = [
-                    'id'            => $d->id,
-                    'defense_type'  => $d->defense_type,
-                    'thesis_title'  => $d->thesis_title,
-                    'role'          => $role,
-                    'type'          => $role,          // aligns with PaymentRate.type
+                    'id' => $d->id,
+                    'defense_type' => $d->defense_type,
+                    'thesis_title' => $d->thesis_title,
+                    'role' => $role,
+                    'type' => $role,          // aligns with PaymentRate.type
                     'program_level' => $programLevel,  // aligns with PaymentRate.program_level
-                    'receivable'    => $rate ? $rate['amount'] : null, // computed expected amount
+                    'receivable' => $rate ? $rate['amount'] : null, // computed expected amount
                 ];
             }
 
@@ -164,51 +177,61 @@ class PanelistController extends Controller
             return [
                 ...$panelist->toArray(),
                 'assignments' => $assignmentDetails,
-                'status'      => $assignmentDetails->isEmpty() ? 'Not Assigned' : 'Assigned',
+                'status' => $assignmentDetails->isEmpty() ? 'Not Assigned' : 'Assigned',
             ];
         })->values();
 
         return Inertia::render('coordinator/panelists/index', [
-            'panelists'     => $panelists,
+            'panelists' => $panelists,
             // optional to pass for client fallback
-            'paymentRates'  => PaymentRate::all()->values(),
+            'paymentRates' => PaymentRate::all()->values(),
         ]);
     }
 
     private function normalizeDefenseType($dt)
     {
-        if (!$dt) return '';
+        if (! $dt) {
+            return '';
+        }
         $s = strtolower(preg_replace('/[\s-]+/', '', (string) $dt));
-        if (str_contains($s, 'prefinal')) return 'Prefinal';
-        if (str_contains($s, 'proposal')) return 'Proposal';
+        if (str_contains($s, 'prefinal')) {
+            return 'Prefinal';
+        }
+        if (str_contains($s, 'proposal')) {
+            return 'Proposal';
+        }
         // ensure 'final' check does not override 'prefinal'
-        if (str_contains($s, 'final')) return 'Final';
+        if (str_contains($s, 'final')) {
+            return 'Final';
+        }
+
         return (string) $dt;
     }
 
     // Kept for other endpoints used elsewhere
     public function allCombined()
     {
-        $faculty = User::whereIn('role',['Faculty','Adviser'])
+        abort_unless(in_array(auth()->user()?->role, ['Coordinator', 'Administrative Assistant', 'Dean']), 403);
+        $adviser = User::whereIn('role', ['Adviser'])
             ->orderBy('last_name')
             ->orderBy('first_name')
             ->get()
-            ->map(fn($f)=>[
-                'id' => 'faculty-'.$f->id,
-                'name' => trim($f->first_name.' '.($f->middle_name? $f->middle_name.' ':'').$f->last_name),
-                'email'=> $f->email,
-                'type' => 'Faculty'
+            ->map(fn ($f) => [
+                'id' => 'adviser-'.$f->id,
+                'name' => trim($f->first_name.' '.($f->middle_name ? $f->middle_name.' ' : '').$f->last_name),
+                'email' => $f->email,
+                'type' => 'Adviser',
             ]);
 
         $panelists = Panelist::orderBy('name')
             ->get()
-            ->map(fn($p)=>[
+            ->map(fn ($p) => [
                 'id' => 'panelist-'.$p->id,
                 'name' => $p->name,
-                'email'=> $p->email,
-                'type' => 'Panelist'
+                'email' => $p->email,
+                'type' => 'Panelist',
             ]);
 
-        return response()->json($faculty->concat($panelists)->values());
+        return response()->json($adviser->concat($panelists)->values());
     }
 }

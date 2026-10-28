@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class PaymentSubmission extends Model
 {
     protected $table = 'payment_submissions';
+
     protected $primaryKey = 'payment_id';
 
     protected $fillable = [
@@ -31,11 +32,11 @@ class PaymentSubmission extends Model
     public function student(): BelongsTo
     {
         // Change to Student::class if you use a dedicated students table
-        return $this->belongsTo(\App\Models\User::class, 'student_id');
+        return $this->belongsTo(User::class, 'student_id');
     }
 
     public function checker(): BelongsTo
     {
-        return $this->belongsTo(\App\Models\User::class, 'checked_by');
+        return $this->belongsTo(User::class, 'checked_by');
     }
 }

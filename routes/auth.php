@@ -1,18 +1,20 @@
 <?php
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\AuthenticatedSessionV2Controller;
 use App\Http\Controllers\Auth\ConfirmablePasswordController;
 use App\Http\Controllers\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Auth\EmailVerificationPromptController;
+use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Auth\VerifyEmailController;
-use Illuminate\Support\Facades\Route;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
-use App\Models\User;
+use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest')->group(function () {
     Route::get('register', [RegisteredUserController::class, 'create'])
@@ -25,10 +27,15 @@ Route::middleware('guest')->group(function () {
 
     Route::post('login', [AuthenticatedSessionController::class, 'store']);
 
+    Route::get('auth/google', [GoogleAuthController::class, 'redirect'])
+        ->middleware('throttle:10,1')->name('auth.google.redirect');
+    Route::get('auth/google/callback', [GoogleAuthController::class, 'callback'])
+        ->middleware('throttle:20,1')->name('auth.google.callback');
+
     // V2 Debug login (no OAuth) - only enabled when DEBUG_LOGIN_V2=true or APP_ENV != production
-    Route::get('login-v2', [\App\Http\Controllers\Auth\AuthenticatedSessionV2Controller::class, 'create'])
+    Route::get('login-v2', [AuthenticatedSessionV2Controller::class, 'create'])
         ->name('login.v2.get');
-    Route::post('login-v2', [\App\Http\Controllers\Auth\AuthenticatedSessionV2Controller::class, 'store'])
+    Route::post('login-v2', [AuthenticatedSessionV2Controller::class, 'store'])
         ->name('login.v2');
 
     Route::get('forgot-password', [PasswordResetLinkController::class, 'create'])
@@ -78,6 +85,7 @@ Route::post('/login-registered', function (Request $request) {
     if ($user && $user->password && Hash::check($credentials['password'], $user->password)) {
         Auth::login($user, $request->boolean('remember'));
         $request->session()->regenerate();
+
         return redirect()->intended('/dashboard');
     }
 

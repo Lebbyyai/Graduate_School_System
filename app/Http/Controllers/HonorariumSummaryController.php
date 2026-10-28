@@ -1,9 +1,9 @@
-<?php 
+<?php
 
 namespace App\Http\Controllers;
 
-use App\Models\ProgramRecord;
 use App\Models\DefenseRequest;
+use App\Models\ProgramRecord;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 
@@ -11,14 +11,15 @@ class HonorariumSummaryController extends Controller
 {
     public function index(Request $request)
     {
+        abort_unless(in_array($request->user()?->role, ['Administrative Assistant', 'Dean', 'Super Admin']), 403);
         // Add this line at the top:
         \Log::info('HonorariumSummaryController@index CALLED');
 
         // Get all programs
-        $programs = \App\Models\ProgramRecord::all();
+        $programs = ProgramRecord::all();
 
         // Get all defense requests with payments
-        $defenseRequests = \App\Models\DefenseRequest::with(['honorariumPayments', 'user'])->get();
+        $defenseRequests = DefenseRequest::with(['honorariumPayments', 'user'])->get();
 
         // Group payments by program
         $records = [];
@@ -30,7 +31,7 @@ class HonorariumSummaryController extends Controller
                         foreach ($dr->honorariumPayments as $payment) {
                             $programPayments[] = [
                                 'id' => $payment->id,
-                                'school_year' => $dr->created_at ? $dr->created_at->format('Y') . '-' . ($dr->created_at->format('Y') + 1) : '',
+                                'school_year' => $dr->created_at ? $dr->created_at->format('Y').'-'.($dr->created_at->format('Y') + 1) : '',
                                 'payment_date' => $payment->payment_date ?? '',
                                 'defense_status' => $dr->workflow_state_display ?? $dr->workflow_state ?? '',
                                 'amount' => $payment->amount ?? '',
@@ -51,43 +52,23 @@ class HonorariumSummaryController extends Controller
             ];
         }
 
-        // --- Add this dummy record for testing ---
-        $records[] = [
-            'id' => 999,
-            'name' => 'Test Program',
-            'program' => 'BSCOMP',
-            'category' => 'Bachelors',
-            'date_edited' => '2025-08-08',
-            'payments' => [
-                [
-                    'id' => 1,
-                    'school_year' => '2024-2025',
-                    'payment_date' => '2025-08-08',
-                    'defense_status' => 'Completed',
-                    'amount' => '1000',
-                    'panelist_name' => 'John Doe',
-                    'role' => 'Panelist',
-                ]
-            ],
-        ];
-        // --- End dummy record ---
-
         return Inertia::render('honorarium/honorarium-summary/Index', [
-            'records' => $records
+            'records' => $records,
         ]);
     }
 
     public function download(ProgramRecord $record)
     {
+        abort_unless(in_array(auth()->user()?->role, ['Administrative Assistant', 'Dean', 'Super Admin']), 403);
         // Get all defense requests for this program
-        $defenseRequests = \App\Models\DefenseRequest::where('program', $record->program)->get();
+        $defenseRequests = DefenseRequest::where('program', $record->program)->get();
 
         // Collect all honorarium payments for these defense requests
         $payments = [];
         foreach ($defenseRequests as $dr) {
             foreach ($dr->honorariumPayments as $payment) {
                 $payments[] = [
-                    'school_year' => $dr->created_at ? $dr->created_at->format('Y') . '-' . ($dr->created_at->format('Y') + 1) : '',
+                    'school_year' => $dr->created_at ? $dr->created_at->format('Y').'-'.($dr->created_at->format('Y') + 1) : '',
                     'payment_date' => $payment->payment_date ? $payment->payment_date : '',
                     'defense_status' => $dr->workflow_state_display ?? $dr->workflow_state,
                     'amount' => $payment->amount,
@@ -97,7 +78,7 @@ class HonorariumSummaryController extends Controller
             }
         }
 
-        $filename = $record->name . '_payments.csv';
+        $filename = $record->name.'_payments.csv';
 
         $headers = [
             'Content-Type' => 'text/csv',

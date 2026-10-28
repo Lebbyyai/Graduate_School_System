@@ -1,23 +1,14 @@
-import { useState, useRef, useEffect } from 'react';
+import AppearanceToggleDropdown from '@/components/appearance-dropdown';
 import { Breadcrumbs } from '@/components/breadcrumbs';
-import { SidebarTrigger } from '@/components/ui/sidebar';
-import { type BreadcrumbItem as BreadcrumbItemType } from '@/types';
-import { Bell } from 'lucide-react';
+import Notifications from '@/components/notifications';
 import { Button } from '@/components/ui/button';
-import {
-    Sheet,
-    SheetContent,
-    SheetHeader,
-    SheetTitle,
-    SheetTrigger,
-} from "@/components/ui/sheet";
-import Notifications from "@/components/notifications";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { SidebarTrigger } from '@/components/ui/sidebar';
+import type { Notification } from '@/types';
+import { type BreadcrumbItem as BreadcrumbItemType } from '@/types';
 import { usePage } from '@inertiajs/react';
-import type { Notification } from "@/types";
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Moon, Sun, Laptop2 } from "lucide-react";
-import { useTheme } from "next-themes"; // If you use next-themes for theme switching
-import AppearanceToggleDropdown from "@/components/appearance-dropdown";
+import { Bell } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function AppSidebarHeader({ breadcrumbs = [] }: { breadcrumbs?: BreadcrumbItemType[] }) {
     const [open, setOpen] = useState(false);
@@ -25,8 +16,36 @@ export function AppSidebarHeader({ breadcrumbs = [] }: { breadcrumbs?: Breadcrum
     const bellBtnRef = useRef<HTMLButtonElement>(null);
 
     const page = usePage<{ notifications?: Notification[]; unreadCount?: number }>();
-    const unreadCount = typeof page.props.unreadCount === "number" ? page.props.unreadCount : 0;
-    const notifications = Array.isArray(page.props.notifications) ? page.props.notifications : [];
+    const [unreadCount, setUnreadCount] = useState(page.props.unreadCount ?? 0);
+    const [notifications, setNotifications] = useState<Notification[]>(page.props.notifications ?? []);
+    useEffect(() => {
+        setUnreadCount(page.props.unreadCount ?? 0);
+        setNotifications(page.props.notifications ?? []);
+    }, [page.props.notifications, page.props.unreadCount]);
+    const refreshNotifications = useCallback(async () => {
+        if (document.visibilityState !== 'visible') return;
+        try {
+            const response = await fetch('/notifications/feed', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
+            if (!response.ok) return;
+            const data = await response.json();
+            setNotifications(data.notifications);
+            setUnreadCount(data.unreadCount);
+        } catch {
+            /* Keep the last successful feed if offline. */
+        }
+    }, []);
+    useEffect(() => {
+        const timer = window.setInterval(refreshNotifications, 30000);
+        window.addEventListener('focus', refreshNotifications);
+        window.addEventListener('notifications-updated', refreshNotifications);
+        document.addEventListener('visibilitychange', refreshNotifications);
+        return () => {
+            window.clearInterval(timer);
+            window.removeEventListener('focus', refreshNotifications);
+            window.removeEventListener('notifications-updated', refreshNotifications);
+            document.removeEventListener('visibilitychange', refreshNotifications);
+        };
+    }, [refreshNotifications]);
 
     useEffect(() => {
         function handleClick(e: MouseEvent) {
@@ -43,38 +62,35 @@ export function AppSidebarHeader({ breadcrumbs = [] }: { breadcrumbs?: Breadcrum
     }, [open]);
 
     // Add theme switching logic
-    const { theme, setTheme } = useTheme();
 
     return (
-        <header className="border-sidebar-border/50 flex h-16 shrink-0 items-center gap-2 border-b px-6 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12 md:px-4 relative dark:bg-background dark:border-border">
+        <header className="border-sidebar-border/50 dark:bg-background dark:border-border relative flex h-16 shrink-0 items-center gap-2 border-b px-6 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12 md:px-4">
             <div className="flex flex-1 items-center justify-between">
                 <div className="flex items-center gap-2">
                     <SidebarTrigger className="ml-1" />
                     <Breadcrumbs breadcrumbs={breadcrumbs} />
                 </div>
-                <div className="flex items-center gap-2 mr-5 relative">
+                <div className="relative mr-5 flex items-center gap-2">
                     {/* Notifications Bell */}
                     <Sheet>
                         <SheetTrigger asChild>
                             <Button
                                 ref={bellBtnRef}
                                 variant="ghost"
-                                className="h-8 w-8 p-3  hover:bg-accent dark:text-white dark:hover:bg-muted hover:cursor-pointer relative"
+                                className="hover:bg-accent dark:hover:bg-muted relative h-8 w-8 p-3 hover:cursor-pointer dark:text-white"
                                 aria-label="Show notifications"
                             >
                                 <Bell className="size-5 stroke-[1.5]" />
                                 {unreadCount > 0 && (
-                                    <span
-                                        className="absolute text-white top-0 right-0 px-1 min-w-4 translate-x-1/5 translate-y-1/9 origin-center flex items-center justify-center text-[10px] bg-rose-500 text-destructive-foreground dark:bg-rose-900 dark:text-rose-200 transition-all duration-150 "
-                                    >
+                                    <span className="text-destructive-foreground absolute top-0 right-0 flex min-w-4 origin-center translate-x-1/5 translate-y-1/9 items-center justify-center bg-rose-500 px-1 text-[10px] text-white transition-all duration-150 dark:bg-rose-900 dark:text-rose-200">
                                         {unreadCount}
                                     </span>
                                 )}
                             </Button>
                         </SheetTrigger>
-                        <SheetContent className='w-[100px] sm:w-[340px] dark:bg-background dark:text-muted-foreground'>
+                        <SheetContent className="dark:bg-background dark:text-muted-foreground w-full sm:w-[380px]">
                             <SheetHeader>
-                                <Bell/>
+                                <Bell />
                                 <SheetTitle>Notifications</SheetTitle>
                             </SheetHeader>
                             <Notifications notifications={notifications} />

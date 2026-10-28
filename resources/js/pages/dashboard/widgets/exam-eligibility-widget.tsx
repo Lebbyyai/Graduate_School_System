@@ -1,24 +1,49 @@
-import React from 'react';
+import { useEffect, useState } from 'react';
 
-const ExamEligibilityWidget: React.FC<{ simple?: boolean }> = ({ simple }) => {
-  // Replace this with your real eligibility logic:
-  const eligible = true; // or false
+const REQUIREMENTS = ['Complete grades (registrar verified)', 'Complete documents submitted', 'No outstanding tuition balance'];
+type EligibilityState = 'Checking...' | 'Eligible' | 'Not eligible' | 'Not verified';
 
-  if (simple) {
-    return (
-      <span className={`font-bold text-2xl ${eligible ? "text-zinc-800 dark:text-zinc-100" : "text-zinc-400 dark:text-zinc-500"}`}>
-        {eligible ? "Eligible" : "Not Eligible"}
-      </span>
+export function examEligibilityLabel(data: unknown): EligibilityState {
+    if (typeof data !== 'object' || data === null) return 'Not verified';
+    const result = data as { eligible?: unknown; error?: unknown; requirements?: { name?: string; completed?: unknown }[] };
+    if (result.error || !Array.isArray(result.requirements)) return 'Not verified';
+    const checks = REQUIREMENTS.map((name) => result.requirements?.find((item) => item && item.name === name)?.completed);
+    if (checks.some((completed) => completed !== true && completed !== false)) return 'Not verified';
+    return result.eligible === true && checks.every((completed) => completed === true) ? 'Eligible' : 'Not eligible';
+}
+
+export default function ExamEligibilityWidget({ simple }: { simple?: boolean }) {
+    const [status, setStatus] = useState<EligibilityState>('Checking...');
+    useEffect(() => {
+        const controller = new AbortController();
+        async function check() {
+            try {
+                const response = await fetch('/api/comprehensive-exam/eligibility', {
+                    headers: { Accept: 'application/json' },
+                    credentials: 'same-origin',
+                    signal: controller.signal,
+                });
+                if (!response.ok) throw new Error('Eligibility unavailable');
+                const data: unknown = await response.json();
+                if (!controller.signal.aborted) setStatus(examEligibilityLabel(data));
+            } catch {
+                if (!controller.signal.aborted) setStatus('Not verified');
+            }
+        }
+        void check();
+        return () => controller.abort();
+    }, []);
+
+    const label = (
+        <span role="status" className="text-foreground text-2xl font-bold">
+            {status}
+        </span>
     );
-  }
-
-  // (Optional: keep the full widget for other uses)
-  return (
-    <div className="border-sidebar-border/70 dark:border-sidebar-border aspect-video rounded-xl border p-5 flex flex-col justify-between bg-white dark:bg-zinc-900">
-      <h3 className="text-[13px] font-medium mb-2">Exam Eligibility</h3>
-      
-    </div>
-  );
-};
-
-export default ExamEligibilityWidget;
+    if (simple) return label;
+    return (
+        <div className="bg-card text-card-foreground border-border flex aspect-video flex-col justify-between rounded-xl border p-5">
+            <h3 className="mb-2 text-[13px] font-medium">Exam Eligibility</h3>
+            {label}
+        </div>
+    );
+}

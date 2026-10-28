@@ -201,7 +201,7 @@
             <div class="message">
                 <p>We regret to inform you that <strong>{{ $adviserFullName }}</strong> was unable to accept the adviser assignment for your graduate program at this time.</p>
                 
-                <p>This decision does not reflect on your academic qualifications or potential. Faculty members may decline assignments due to current workload capacity, scheduling conflicts, research focus alignment, or other professional commitments.</p>
+                <p>This decision does not reflect on your academic qualifications or potential. Adviser members may decline assignments due to current workload capacity, scheduling conflicts, research focus alignment, or other professional commitments.</p>
             </div>
 
             <div class="divider"></div>

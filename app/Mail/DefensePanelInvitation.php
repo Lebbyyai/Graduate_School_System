@@ -2,28 +2,39 @@
 
 namespace App\Mail;
 
+use App\Models\DefenseRequest;
+use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
+use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
-use App\Models\DefenseRequest;
-use App\Models\User;
 
 class DefensePanelInvitation extends Mailable
 {
     use Queueable, SerializesModels;
 
     public $panelistName;
+
     public $role;
+
     public $studentName;
+
     public $defenseTitle;
+
     public $defenseDate;
+
     public $defenseTime;
+
     public $defenseEndTime;
+
     public $defenseMode;
+
     public $defenseVenue;
+
     public $adviserName;
+
     public $otherPanels;
 
     /**
@@ -32,15 +43,15 @@ class DefensePanelInvitation extends Mailable
     public function __construct(DefenseRequest $defenseRequest, User $panelist, string $role)
     {
         // Get panelist information
-        $this->panelistName = trim(($panelist->first_name ?? '') . ' ' . 
-                                    ($panelist->middle_name ?? '') . ' ' . 
+        $this->panelistName = trim(($panelist->first_name ?? '').' '.
+                                    ($panelist->middle_name ?? '').' '.
                                     ($panelist->last_name ?? ''));
         $this->role = $role;
 
         // Get student information
         $student = $defenseRequest->user;
-        $this->studentName = trim(($student->first_name ?? '') . ' ' . 
-                                   ($student->middle_name ?? '') . ' ' . 
+        $this->studentName = trim(($student->first_name ?? '').' '.
+                                   ($student->middle_name ?? '').' '.
                                    ($student->last_name ?? ''));
 
         // Get defense details
@@ -54,8 +65,8 @@ class DefensePanelInvitation extends Mailable
         // Get adviser information
         $adviser = $defenseRequest->adviserUser;
         if ($adviser) {
-            $this->adviserName = trim(($adviser->first_name ?? '') . ' ' . 
-                                       ($adviser->middle_name ?? '') . ' ' . 
+            $this->adviserName = trim(($adviser->first_name ?? '').' '.
+                                       ($adviser->middle_name ?? '').' '.
                                        ($adviser->last_name ?? ''));
         } else {
             $this->adviserName = 'N/A';
@@ -67,10 +78,10 @@ class DefensePanelInvitation extends Mailable
             ->get()
             ->map(function ($p) {
                 return [
-                    'name' => trim(($p->first_name ?? '') . ' ' . 
-                                  ($p->middle_name ?? '') . ' ' . 
+                    'name' => trim(($p->first_name ?? '').' '.
+                                  ($p->middle_name ?? '').' '.
                                   ($p->last_name ?? '')),
-                    'role' => $p->pivot->role ?? 'Panel Member'
+                    'role' => $p->pivot->role ?? 'Panel Member',
                 ];
             });
     }
@@ -98,7 +109,7 @@ class DefensePanelInvitation extends Mailable
     /**
      * Get the attachments for the message.
      *
-     * @return array<int, \Illuminate\Mail\Mailables\Attachment>
+     * @return array<int, Attachment>
      */
     public function attachments(): array
     {

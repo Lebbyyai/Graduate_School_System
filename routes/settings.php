@@ -2,17 +2,17 @@
 
 use App\Http\Controllers\Settings\PasswordController;
 use App\Http\Controllers\Settings\ProfileController;
-use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Auth;
-use Inertia\Inertia;
 use App\Models\DocumentTemplate;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 /*
 | Central settings & profile routes.
 | Provides both /settings/profile and legacy /profile path (same name: profile.edit).
 */
-Route::middleware(['auth','verified'])->group(function () {
+Route::middleware(['auth', 'verified'])->group(function () {
 
     // /settings -> /settings/profile
     Route::redirect('/settings', '/settings/profile')->name('settings');
@@ -34,15 +34,17 @@ Route::middleware(['auth','verified'])->group(function () {
 
     // Document Templates (Dean / Coordinator)
     Route::get('/settings/documents', function () {
-        abort_unless(in_array(Auth::user()->role,['Dean','Coordinator']),403);
+        abort_unless(in_array(Auth::user()->role, ['Dean', 'Super Admin']), 403);
+
         return Inertia::render('settings/documents/Index');
     })->name('settings.documents');
 
     Route::get('/settings/documents/{template}/edit', function (DocumentTemplate $template) {
-        abort_unless(in_array(Auth::user()->role,['Dean','Coordinator']),403);
+        abort_unless(in_array(Auth::user()->role, ['Dean', 'Super Admin']), 403);
+
         return Inertia::render('settings/documents/TemplateEditor', [
             'templateId' => $template->id,
-            'template'   => $template
+            'template' => $template,
         ]);
     })->name('settings.documents.edit');
 
@@ -54,20 +56,20 @@ Route::middleware(['auth','verified'])->group(function () {
     // General Settings (Coordinator only)
     Route::get('/settings/general', function () {
         $role = Auth::user()->role;
-        abort_unless(in_array($role, ['Coordinator', 'Adviser', 'Faculty']), 403);
+        abort_unless(in_array($role, ['Coordinator', 'Adviser']), 403);
 
         // Coordinator: defense submissions
         $acceptDefense = null;
         if ($role === 'Coordinator') {
-            $acceptDefense = \DB::table('settings')->where('key', 'accept_defense')->value('value');
+            $acceptDefense = DB::table('settings')->where('key', 'accept_defense')->value('value');
             $acceptDefense = $acceptDefense === null ? true : $acceptDefense === '1';
         }
 
-        // Adviser/Faculty: adviser code and auto-accept
+        // Adviser: adviser code and auto-accept
         $autoAccept = null;
         $adviserCode = null;
-        if (in_array($role, ['Adviser', 'Faculty'])) {
-            $autoAccept = \DB::table('adviser_settings')->where('adviser_id', Auth::id())->value('auto_accept_students');
+        if (in_array($role, ['Adviser'])) {
+            $autoAccept = DB::table('adviser_settings')->where('adviser_id', Auth::id())->value('auto_accept_students');
             $autoAccept = $autoAccept === null ? false : $autoAccept == 1;
             $adviserCode = Auth::user()->adviser_code;
         }
@@ -83,40 +85,43 @@ Route::middleware(['auth','verified'])->group(function () {
     Route::post('/api/settings/general', function (Request $request) {
         abort_unless(Auth::user()->role === 'Coordinator', 403);
         $accept = $request->input('acceptDefense') ? '1' : '0';
-        \DB::table('settings')->updateOrInsert(
+        DB::table('settings')->updateOrInsert(
             ['key' => 'accept_defense'],
             ['value' => $accept]
         );
+
         return response()->json(['ok' => true, 'acceptDefense' => $accept]);
     });
 
     // Adviser code reset
     Route::post('/settings/adviser/reset-code', function (Request $request) {
         $user = Auth::user();
-        abort_unless(in_array($user->role, ['Adviser', 'Faculty']), 403);
+        abort_unless(in_array($user->role, ['Adviser']), 403);
         $user->adviser_code = null;
         $user->generateAdviserCode();
         $user->save();
+
         return response()->json(['adviser_code' => $user->adviser_code]);
     });
 
     // Adviser auto-accept toggle
     Route::post('/settings/adviser/auto-accept', function (Request $request) {
         $user = Auth::user();
-        abort_unless(in_array($user->role, ['Adviser', 'Faculty']), 403);
+        abort_unless(in_array($user->role, ['Adviser']), 403);
         $autoAccept = $request->input('autoAccept') ? 1 : 0;
-        \DB::table('adviser_settings')->updateOrInsert(
+        DB::table('adviser_settings')->updateOrInsert(
             ['adviser_id' => $user->id],
             ['auto_accept_students' => $autoAccept]
         );
+
         return response()->json(['autoAccept' => $autoAccept]);
     });
 
     Route::get('/settings/adviser', function () {
         $user = Auth::user();
-        abort_unless(in_array($user->role, ['Adviser', 'Faculty']), 403);
+        abort_unless(in_array($user->role, ['Adviser']), 403);
 
-        $autoAccept = \DB::table('adviser_settings')->where('adviser_id', $user->id)->value('auto_accept_students');
+        $autoAccept = DB::table('adviser_settings')->where('adviser_id', $user->id)->value('auto_accept_students');
         $autoAccept = $autoAccept === null ? false : $autoAccept == 1;
 
         return Inertia::render('settings/adviser', [

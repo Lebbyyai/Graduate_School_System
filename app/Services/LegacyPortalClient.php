@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\DataAccessAudit;
+use App\Models\LegacyAcademicRecord;
+use App\Models\LegacyClearanceStatus;
+use App\Models\LegacyStudentInfo;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Cache;
-use Carbon\Carbon;
-use App\Models\{LegacyCredential, LegacyRecordCache, DataAccessAudit};
 use Throwable;
 
 class LegacyPortalClient
@@ -28,9 +31,9 @@ class LegacyPortalClient
             ])->withOptions([
                 'allow_redirects' => true,
                 'timeout' => $config['timeout'],
-            ])->get($base . '/index.cfm?fa=login.login_show');
+            ])->get($base.'/index.cfm?fa=login.login_show');
             $baseCookies = $this->normalizeCookies($prefetch->cookies());
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $baseCookies = [];
         }
 
@@ -40,33 +43,34 @@ class LegacyPortalClient
             'User-Agent' => $config['user_agent'],
             'Accept' => 'application/json, text/plain, */*',
             'Accept-Language' => 'en-GB,en;q=0.9',
-            'Referer' => $base . '/index.cfm?fa=login.login_show',
+            'Referer' => $base.'/index.cfm?fa=login.login_show',
             'Cookie' => $cookieHeaderBase,
         ])->withOptions([
             'allow_redirects' => false,
             'connect_timeout' => $config['timeout'],
             'timeout' => $config['timeout'],
-        ])->get($base . $config['login_path'], $params);
+        ])->get($base.$config['login_path'], $params);
 
-        if (!$response->ok()) {
+        if (! $response->ok()) {
             Log::warning('Legacy login non-OK', ['status' => $response->status(), 'body' => $response->body()]);
-            throw new \RuntimeException('Legacy login HTTP error: ' . $response->status());
+            throw new \RuntimeException('Legacy login HTTP error: '.$response->status());
         }
 
         $json = json_decode($response->body(), true);
-        if (!is_array($json) || !isset($json['result_id'])) {
+        if (! is_array($json) || ! isset($json['result_id'])) {
             Log::warning('Legacy login unexpected body', ['body' => $response->body()]);
             throw new \RuntimeException('Unexpected legacy login response.');
         }
-        if ((int)$json['result_id'] !== 1) {
+        if ((int) $json['result_id'] !== 1) {
             Log::warning('Legacy login failed result_id', ['result_id' => $json['result_id'], 'body' => $json]);
             throw new \RuntimeException('Legacy authentication failed.');
         }
 
         // Merge cookies (baseline + login response)
-    $loginCookies = $this->normalizeCookies($response->cookies());
-    $merged = array_merge($baseCookies, $loginCookies);
-    $cookieHeader = $this->buildCookieHeader($merged);
+        $loginCookies = $this->normalizeCookies($response->cookies());
+        $merged = array_merge($baseCookies, $loginCookies);
+        $cookieHeader = $this->buildCookieHeader($merged);
+
         return [
             'cookies' => $merged,
             'cookie_header' => $cookieHeader,
@@ -105,7 +109,7 @@ class LegacyPortalClient
         // Build initial cookie header from login response cookies
         $cookieHeader = $this->buildCookieHeader($session['cookies'] ?? []);
 
-        $firstUrl = $base . '/index.cfm?fa=academic_record.student_academic_record_index';
+        $firstUrl = $base.'/index.cfm?fa=academic_record.student_academic_record_index';
         $first = Http::withHeaders([
             'User-Agent' => $config['user_agent'],
             'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -116,7 +120,7 @@ class LegacyPortalClient
         ])->get($firstUrl);
 
         if ($first->status() !== 302) {
-            throw new \RuntimeException('Unexpected first redirect status: ' . $first->status());
+            throw new \RuntimeException('Unexpected first redirect status: '.$first->status());
         }
         $secondLocation = $first->header('Location');
         $this->mergeSetCookies($cookieHeader, $first);
@@ -128,10 +132,10 @@ class LegacyPortalClient
         ])->withOptions([
             'allow_redirects' => false,
             'timeout' => $config['timeout'],
-        ])->get($base . $secondLocation);
+        ])->get($base.$secondLocation);
 
         if ($second->status() !== 302) {
-            throw new \RuntimeException('Unexpected second redirect status: ' . $second->status());
+            throw new \RuntimeException('Unexpected second redirect status: '.$second->status());
         }
         $thirdLocation = $second->header('Location');
         $this->mergeSetCookies($cookieHeader, $second); // capture STUDENT_ID
@@ -143,10 +147,10 @@ class LegacyPortalClient
         ])->withOptions([
             'allow_redirects' => false,
             'timeout' => $config['timeout'],
-        ])->get($base . $thirdLocation);
+        ])->get($base.$thirdLocation);
 
-        if (!$final->ok()) {
-            throw new \RuntimeException('Final academic records fetch failed: ' . $final->status());
+        if (! $final->ok()) {
+            throw new \RuntimeException('Final academic records fetch failed: '.$final->status());
         }
 
         return $final->body();
@@ -158,7 +162,7 @@ class LegacyPortalClient
      */
     public function parseAcademicRecords(string $html): array
     {
-        $dom = new \DOMDocument();
+        $dom = new \DOMDocument;
         libxml_use_internal_errors(true);
         $dom->loadHTML($html);
         libxml_clear_errors();
@@ -174,11 +178,11 @@ class LegacyPortalClient
         foreach ($h6Nodes as $node) {
             $text = trim($node->textContent);
             if (stripos($text, 'Student Number:') !== false) {
-                $student['student_number'] = trim(preg_replace('/^.*?:/','',$text));
+                $student['student_number'] = trim(preg_replace('/^.*?:/', '', $text));
             } elseif (stripos($text, 'Name:') !== false) {
-                $student['name'] = trim(preg_replace('/^.*?:/','',$text));
+                $student['name'] = trim(preg_replace('/^.*?:/', '', $text));
             } elseif (stripos($text, 'Degree Program:') !== false) {
-                $student['program'] = trim(preg_replace('/^.*?:/','',$text));
+                $student['program'] = trim(preg_replace('/^.*?:/', '', $text));
             }
         }
 
@@ -192,7 +196,9 @@ class LegacyPortalClient
             } else {
                 continue;
             }
-            if ($id === '') continue;
+            if ($id === '') {
+                continue;
+            }
             $label = trim($opt->textContent);
             $selected = $opt instanceof \DOMElement ? $opt->hasAttribute('selected') : false;
             $semesters[] = [
@@ -210,7 +216,9 @@ class LegacyPortalClient
         $rows = $xpath->query('//div[contains(@class, "row-table-default-body")]//div[contains(@class, "row row-small") and .//div[contains(@class, "col s4")]]');
         foreach ($rows as $r) {
             $cols = $xpath->query('.//div[contains(@class, "col ")]', $r);
-            if ($cols->length < 7) continue;
+            if ($cols->length < 7) {
+                continue;
+            }
             $courseRaw = trim($cols->item(0)->textContent); // e.g. {{info.code}} | {{info.title}}
             $unitType = trim($cols->item(1)->textContent); // {{info.duration_unit}} / {{info.course_type}}
             $prelim = trim($cols->item(2)->textContent);
@@ -275,6 +283,7 @@ class LegacyPortalClient
             ];
         }
         Log::warning('Legacy academic init params not found');
+
         return null;
     }
 
@@ -292,23 +301,24 @@ class LegacyPortalClient
             'semester_id' => $semesterId,
             'student_id' => $studentId,
         ]);
-        $url = $base . '/index.cfm?' . $query;
-        $resp = \Illuminate\Support\Facades\Http::withHeaders([
+        $url = $base.'/index.cfm?'.$query;
+        $resp = Http::withHeaders([
             'User-Agent' => $config['user_agent'],
             'Accept' => 'application/json, text/plain, */*',
-            'Referer' => $base . '/index.cfm?fa=academic_record.view_student_academic_records',
+            'Referer' => $base.'/index.cfm?fa=academic_record.view_student_academic_records',
             'Cookie' => $cookieHeader,
         ])->withOptions([
             'timeout' => $config['timeout'],
             'allow_redirects' => false,
         ])->get($url);
-        if (!$resp->ok()) {
-            throw new \RuntimeException('Academic JSON fetch HTTP status ' . $resp->status());
+        if (! $resp->ok()) {
+            throw new \RuntimeException('Academic JSON fetch HTTP status '.$resp->status());
         }
         $data = json_decode($resp->body(), true);
-        if (!is_array($data)) {
+        if (! is_array($data)) {
             throw new \RuntimeException('Academic JSON decode failed');
         }
+
         return $data;
     }
 
@@ -343,12 +353,13 @@ class LegacyPortalClient
         if (is_array($cookies)) {
             foreach ($cookies as $cookie) {
                 if (is_object($cookie) && method_exists($cookie, 'getName')) {
-                    $pairs[] = $cookie->getName() . '=' . $cookie->getValue();
+                    $pairs[] = $cookie->getName().'='.$cookie->getValue();
                 } elseif (is_array($cookie) && isset($cookie['Name'], $cookie['Value'])) {
-                    $pairs[] = $cookie['Name'] . '=' . $cookie['Value'];
+                    $pairs[] = $cookie['Name'].'='.$cookie['Value'];
                 }
             }
         }
+
         return implode('; ', $pairs);
     }
 
@@ -362,10 +373,11 @@ class LegacyPortalClient
         if (is_object($cookies) && method_exists($cookies, 'toArray')) {
             try {
                 return $cookies->toArray();
-            } catch (\Throwable $e) {
+            } catch (Throwable $e) {
                 return [];
             }
         }
+
         return is_array($cookies) ? $cookies : [];
     }
 
@@ -398,11 +410,11 @@ class LegacyPortalClient
             }
             $pairs = [];
             foreach ($existing as $n => $v) {
-                $pairs[] = $n . '=' . $v;
+                $pairs[] = $n.'='.$v;
             }
             $cookieHeader = implode('; ', $pairs);
-        } catch (\Throwable $e) {
-            Log::warning('mergeSetCookies failed: ' . $e->getMessage());
+        } catch (Throwable $e) {
+            Log::warning('mergeSetCookies failed: '.$e->getMessage());
         }
     }
 
@@ -417,7 +429,7 @@ class LegacyPortalClient
                 'occurred_at' => Carbon::now(),
             ]);
         } catch (Throwable $e) {
-            Log::warning('Audit insert failed: ' . $e->getMessage());
+            Log::warning('Audit insert failed: '.$e->getMessage());
         }
     }
 
@@ -430,7 +442,8 @@ class LegacyPortalClient
         $base = $config['base_url'];
         $cookieHeader = $session['cookie_header'] ?? $this->buildCookieHeader($session['cookies'] ?? []);
         $path = '/index.cfm?fa=home.index';
-        $attempts = 0; $max = 5;
+        $attempts = 0;
+        $max = 5;
         while ($attempts < $max) {
             $attempts++;
             $resp = Http::withHeaders([
@@ -440,16 +453,16 @@ class LegacyPortalClient
             ])->withOptions([
                 'timeout' => $config['timeout'],
                 'allow_redirects' => false,
-            ])->get($base . $path);
+            ])->get($base.$path);
 
             // 200 OK
             if ($resp->ok()) {
                 return $resp->body();
             }
             // Follow redirect
-            if (in_array($resp->status(), [301,302,303,307,308])) {
+            if (in_array($resp->status(), [301, 302, 303, 307, 308])) {
                 $loc = $resp->header('Location');
-                if (!$loc) {
+                if (! $loc) {
                     break;
                 }
                 // Merge any new cookies
@@ -464,6 +477,7 @@ class LegacyPortalClient
                     }
                 }
                 $path = $loc;
+
                 continue;
             }
             break; // unexpected status
@@ -476,16 +490,17 @@ class LegacyPortalClient
      */
     public function extractStudentName(string $html): ?array
     {
-        if (!preg_match('/<span class="white-text name medium-text">([^<]+)<\/span>/', $html, $m)) {
+        if (! preg_match('/<span class="white-text name medium-text">([^<]+)<\/span>/', $html, $m)) {
             return null;
         }
         $raw = trim(html_entity_decode($m[1])); // e.g. AMONCIO, JASMINE REI Poliquit
-        if (!str_contains($raw, ',')) {
+        if (! str_contains($raw, ',')) {
             return null;
         }
         [$last, $rest] = array_map('trim', explode(',', $raw, 2));
         $tokens = preg_split('/\s+/', $rest);
-        $first = ''; $middle = null;
+        $first = '';
+        $middle = null;
         if (count($tokens) > 1) {
             $middle = array_pop($tokens);
             $first = implode(' ', $tokens);
@@ -496,6 +511,7 @@ class LegacyPortalClient
         $firstNorm = ucwords(strtolower($first));
         $middleNorm = $middle ? ucwords(strtolower($middle)) : null;
         $lastNorm = strtoupper($last);
+
         return [
             'first_name' => $firstNorm,
             'middle_name' => $middleNorm,
@@ -516,20 +532,22 @@ class LegacyPortalClient
         if (preg_match('/<span class="white-text">([^<]*(Dean|Chair|Coordinator)[^<]*)<\/span>/i', $html, $m2)) {
             return trim(html_entity_decode($m2[1]));
         }
+
         return null;
     }
 
     /**
-     * Extract any staff role (Coordinator, Faculty, Dean, Chair, etc.) from white-text span.
+     * Extract any staff role (Coordinator, Adviser, Dean, Chair, etc.) from white-text span.
      * Returns ['role' => canonical, 'title' => original].
      */
     public function extractStaffRole(string $html): ?array
     {
-        if (!preg_match_all('/<span class="white-text">([^<]+)<\/span>/', $html, $matches)) {
+        if (! preg_match_all('/<span class="white-text">([^<]+)<\/span>/', $html, $matches)) {
             return null;
         }
-        $candidates = array_map(fn($t) => trim(html_entity_decode($t)), $matches[1]);
-        $priority = ['Coordinator' => 'Coordinator', 'Academic Coordinator' => 'Coordinator', 'Faculty' => 'Faculty', 'Dean' => 'Dean', 'Chair' => 'Chair'];
+        $candidates = array_map(fn ($t) => trim(html_entity_decode($t)), $matches[1]);
+        // Keep recognizing the external portal's Faculty title, but use Adviser locally.
+        $priority = ['Coordinator' => 'Coordinator', 'Academic Coordinator' => 'Coordinator', 'Faculty' => 'Adviser', 'Adviser' => 'Adviser', 'Dean' => 'Dean', 'Chair' => 'Chair'];
         foreach ($candidates as $c) {
             foreach ($priority as $needle => $canonical) {
                 if (stripos($c, $needle) !== false) {
@@ -537,6 +555,7 @@ class LegacyPortalClient
                 }
             }
         }
+
         return null;
     }
 
@@ -545,15 +564,18 @@ class LegacyPortalClient
      */
     public function extractCoordinatorNameParts(string $html): ?array
     {
-        if (!preg_match('/<span class="white-text name all-caps">([^<]+)<\/span>/', $html, $m)) {
+        if (! preg_match('/<span class="white-text name all-caps">([^<]+)<\/span>/', $html, $m)) {
             return null;
         }
         $raw = trim(html_entity_decode($m[1]));
-        if (!str_contains($raw, ',')) return null;
+        if (! str_contains($raw, ',')) {
+            return null;
+        }
         [$last, $rest] = array_map('trim', explode(',', $raw, 2));
         $tokens = preg_split('/\s+/', $rest);
         $first = array_shift($tokens) ?? '';
         $middle = $tokens ? implode(' ', $tokens) : null;
+
         return [
             'first_name' => ucwords(strtolower($first)),
             'middle_name' => $middle ? ucwords(strtolower($middle)) : null,
@@ -577,11 +599,14 @@ class LegacyPortalClient
             ])->withOptions([
                 'timeout' => $config['timeout'],
                 'allow_redirects' => true,
-            ])->get($base . '/index.cfm?fa=report.enrollment_statistics');
-            if ($resp->ok()) return $resp->body();
-        } catch (\Throwable $e) {
+            ])->get($base.'/index.cfm?fa=report.enrollment_statistics');
+            if ($resp->ok()) {
+                return $resp->body();
+            }
+        } catch (Throwable $e) {
             Log::debug('fetchEnrollmentStatisticsHtml error: '.$e->getMessage());
         }
+
         return null;
     }
 
@@ -590,7 +615,9 @@ class LegacyPortalClient
      */
     public function parseEnrollmentStats(?string $html): array
     {
-        if (!$html) return [];
+        if (! $html) {
+            return [];
+        }
         $stats = [];
         // Example: capture numbers inside <h5> or <td>
         if (preg_match_all('/>([0-9]{2,})</', $html, $m)) {
@@ -601,11 +628,12 @@ class LegacyPortalClient
             }
         }
         $stats['html_length'] = strlen($html);
+
         return $stats;
     }
 
     /**
-     * Fetch instructor class list page HTML (faculty dashboard).
+     * Fetch instructor class list page HTML (adviser dashboard).
      */
     public function fetchInstructorClassListHtml(array $session): ?string
     {
@@ -617,15 +645,18 @@ class LegacyPortalClient
                 'User-Agent' => $config['user_agent'],
                 'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Cookie' => $cookieHeader,
-                'Referer' => $base . '/index.cfm?fa=home.index',
+                'Referer' => $base.'/index.cfm?fa=home.index',
             ])->withOptions([
                 'timeout' => $config['timeout'],
                 'allow_redirects' => true,
-            ])->get($base . '/index.cfm?fa=class.class_list');
-            if ($resp->ok()) return $resp->body();
-        } catch (\Throwable $e) {
+            ])->get($base.'/index.cfm?fa=class.class_list');
+            if ($resp->ok()) {
+                return $resp->body();
+            }
+        } catch (Throwable $e) {
             Log::debug('fetchInstructorClassListHtml error: '.$e->getMessage());
         }
+
         return null;
     }
 
@@ -635,12 +666,14 @@ class LegacyPortalClient
      */
     public function parseInstructorClassList(?string $html): array
     {
-        if (!$html) return ['rows' => [], 'periods' => [], 'selected_period_id' => null, 'short_period_label' => null];
+        if (! $html) {
+            return ['rows' => [], 'periods' => [], 'selected_period_id' => null, 'short_period_label' => null];
+        }
         $rows = [];
         $periods = [];
         $selectedId = null;
         try {
-            $dom = new \DOMDocument();
+            $dom = new \DOMDocument;
             libxml_use_internal_errors(true);
             $dom->loadHTML($html);
             libxml_clear_errors();
@@ -648,12 +681,18 @@ class LegacyPortalClient
             // Period select options
             $optNodes = $xpath->query('//select[@id="period_id"]/option');
             foreach ($optNodes as $opt) {
-                if (!$opt instanceof \DOMElement) continue;
+                if (! $opt instanceof \DOMElement) {
+                    continue;
+                }
                 $val = $opt->getAttribute('value');
-                if ($val === '0') continue; // placeholder
+                if ($val === '0') {
+                    continue;
+                } // placeholder
                 $label = trim($opt->textContent);
                 $isSel = $opt->hasAttribute('selected');
-                if ($isSel) $selectedId = $val;
+                if ($isSel) {
+                    $selectedId = $val;
+                }
                 $periods[] = [
                     'id' => $val,
                     'label' => $label,
@@ -671,8 +710,10 @@ class LegacyPortalClient
                     if ($tds->length === 8) {
                         $firstCell = trim($tds->item(0)->textContent);
                         // Match patterns like "1.)" or "2.)" or plain numbers
-                        if (!preg_match('/^(\d+)/', $firstCell, $m)) continue; // skip header / info row
-                        $num = (int)$m[1];
+                        if (! preg_match('/^(\d+)/', $firstCell, $m)) {
+                            continue;
+                        } // skip header / info row
+                        $num = (int) $m[1];
                         $actionsCell = $tds->item(7);
                         $anchors = [];
                         if ($actionsCell instanceof \DOMElement) {
@@ -680,12 +721,16 @@ class LegacyPortalClient
                             $anchorNodeList = $xpath->query('.//a', $actionsCell);
                             if ($anchorNodeList) {
                                 foreach ($anchorNodeList as $aNode) {
-                                    if ($aNode instanceof \DOMElement) $anchors[] = $aNode;
+                                    if ($aNode instanceof \DOMElement) {
+                                        $anchors[] = $aNode;
+                                    }
                                 }
                             }
                         }
-                        $classId = null; $printListUrl = null; $permitDuesUrl = null;
-                        if (!empty($anchors)) {
+                        $classId = null;
+                        $printListUrl = null;
+                        $permitDuesUrl = null;
+                        if (! empty($anchors)) {
                             foreach ($anchors as $a) {
                                 /** @var \DOMElement $a */
                                 $href = $a->getAttribute('href');
@@ -714,15 +759,19 @@ class LegacyPortalClient
                     }
                 }
             }
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::debug('parseInstructorClassList error: '.$e->getMessage());
         }
         $short = null;
         if ($selectedId) {
             foreach ($periods as $p) {
-                if ($p['id'] === $selectedId) { $short = $p['short_label']; break; }
+                if ($p['id'] === $selectedId) {
+                    $short = $p['short_label'];
+                    break;
+                }
             }
         }
+
         return [
             'rows' => $rows,
             'periods' => $periods,
@@ -734,9 +783,16 @@ class LegacyPortalClient
     protected function shortenPeriodLabel(string $label): string
     {
         // Map verbose labels to short academic style; placeholder year logic.
-        if (stripos($label, 'First Semester') === 0) return '1st Year - First Sem ' . substr($label, -9);
-        if (stripos($label, 'Second Semester') === 0) return '1st Year - Second Sem ' . substr($label, -9);
-        if (stripos($label, 'Summer') === 0) return 'Summer Term ' . preg_replace('/^[^0-9]+/', '', $label);
+        if (stripos($label, 'First Semester') === 0) {
+            return '1st Year - First Sem '.substr($label, -9);
+        }
+        if (stripos($label, 'Second Semester') === 0) {
+            return '1st Year - Second Sem '.substr($label, -9);
+        }
+        if (stripos($label, 'Summer') === 0) {
+            return 'Summer Term '.preg_replace('/^[^0-9]+/', '', $label);
+        }
+
         return $label;
     }
 
@@ -753,20 +809,23 @@ class LegacyPortalClient
                 'User-Agent' => $config['user_agent'],
                 'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Cookie' => $cookieHeader,
-                'Referer' => $base . '/index.cfm?fa=home.index',
+                'Referer' => $base.'/index.cfm?fa=home.index',
             ])->withOptions([
                 'timeout' => $config['timeout'],
                 'allow_redirects' => true,
-            ])->get($base . '/index.cfm?fa=schedule.my_class_schedule_index');
-            if ($resp->ok()) return $resp->body();
-        } catch (\Throwable $e) {
+            ])->get($base.'/index.cfm?fa=schedule.my_class_schedule_index');
+            if ($resp->ok()) {
+                return $resp->body();
+            }
+        } catch (Throwable $e) {
             Log::debug('fetchStudentClassScheduleHtml error: '.$e->getMessage());
         }
+
         return null;
     }
 
     /**
-     * Set student class schedule period (PERIOD_ID cookie) using secure endpoint similar to faculty.
+     * Set student class schedule period (PERIOD_ID cookie) using secure endpoint similar to adviser.
      */
     public function setStudentClassSchedulePeriod(array &$session, string $periodId): bool
     {
@@ -778,19 +837,21 @@ class LegacyPortalClient
                 'User-Agent' => $config['user_agent'],
                 'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Cookie' => $cookieHeader,
-                'Referer' => $base . '/index.cfm?fa=schedule.my_class_schedule_index',
+                'Referer' => $base.'/index.cfm?fa=schedule.my_class_schedule_index',
             ])->withOptions([
                 'timeout' => $config['timeout'],
                 'allow_redirects' => false,
-            ])->get($base . '/index.cfm?fa=secure.set_my_class_schedule_period_id&period_id=' . urlencode($periodId));
-            if (in_array($resp->status(), [302,301])) {
+            ])->get($base.'/index.cfm?fa=secure.set_my_class_schedule_period_id&period_id='.urlencode($periodId));
+            if (in_array($resp->status(), [302, 301])) {
                 $this->mergeSetCookies($cookieHeader, $resp);
                 $session['cookie_header'] = $cookieHeader;
+
                 return true;
             }
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::debug('setStudentClassSchedulePeriod error: '.$e->getMessage());
         }
+
         return false;
     }
 
@@ -800,12 +861,14 @@ class LegacyPortalClient
      */
     public function parseStudentClassSchedule(?string $html): array
     {
-        if (!$html) return ['instructors' => [], 'periods' => [], 'selected_period_id' => null];
+        if (! $html) {
+            return ['instructors' => [], 'periods' => [], 'selected_period_id' => null];
+        }
         $instructors = [];
         $periods = [];
         $selectedId = null;
         try {
-            $dom = new \DOMDocument();
+            $dom = new \DOMDocument;
             libxml_use_internal_errors(true);
             $dom->loadHTML($html);
             libxml_clear_errors();
@@ -813,12 +876,18 @@ class LegacyPortalClient
             // Period select
             $opts = $xpath->query('//select[@id="period_id"]/option');
             foreach ($opts as $opt) {
-                if (!$opt instanceof \DOMElement) continue;
+                if (! $opt instanceof \DOMElement) {
+                    continue;
+                }
                 $val = $opt->getAttribute('value');
-                if ($val === '0') continue;
+                if ($val === '0') {
+                    continue;
+                }
                 $label = trim($opt->textContent);
                 $sel = $opt->hasAttribute('selected');
-                if ($sel) $selectedId = $val;
+                if ($sel) {
+                    $selectedId = $val;
+                }
                 $periods[] = [
                     'id' => $val,
                     'label' => $label,
@@ -840,9 +909,10 @@ class LegacyPortalClient
                 }
             }
             $instructors = array_values(array_unique($instructors));
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::debug('parseStudentClassSchedule error: '.$e->getMessage());
         }
+
         return [
             'instructors' => $instructors,
             'periods' => $periods,
@@ -864,13 +934,13 @@ class LegacyPortalClient
                 'User-Agent' => $config['user_agent'],
                 'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Cookie' => $cookieHeader,
-                'Referer' => $base . '/index.cfm?fa=class.class_list',
+                'Referer' => $base.'/index.cfm?fa=class.class_list',
             ])->withOptions([
                 'timeout' => $config['timeout'],
                 'allow_redirects' => false,
-            ])->get($base . '/index.cfm?fa=secure.set_class_list_period&period_id=' . urlencode($periodId));
+            ])->get($base.'/index.cfm?fa=secure.set_class_list_period&period_id='.urlencode($periodId));
 
-            if (in_array($resp->status(), [302,301])) {
+            if (in_array($resp->status(), [302, 301])) {
                 $this->mergeSetCookies($cookieHeader, $resp); // capture PERIOD_ID
                 $session['cookie_header'] = $cookieHeader;
                 // Manually follow location to update server-side context (optional, but ensures correctness)
@@ -881,15 +951,16 @@ class LegacyPortalClient
                         'User-Agent' => $config['user_agent'],
                         'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                         'Cookie' => $cookieHeader,
-                        'Referer' => $base . '/index.cfm?fa=class.class_list',
+                        'Referer' => $base.'/index.cfm?fa=class.class_list',
                     ])->withOptions([
                         'timeout' => $config['timeout'],
                         'allow_redirects' => true,
-                    ])->get(str_starts_with($loc, 'http') ? $loc : $base . $loc);
+                    ])->get(str_starts_with($loc, 'http') ? $loc : $base.$loc);
                     if ($follow->ok()) {
                         return $follow->body();
                     }
                 }
+
                 // Fallback: fetch fresh list
                 return $this->fetchInstructorClassListHtml($session);
             }
@@ -897,11 +968,13 @@ class LegacyPortalClient
             if ($resp->ok()) {
                 $this->mergeSetCookies($cookieHeader, $resp);
                 $session['cookie_header'] = $cookieHeader;
+
                 return $this->fetchInstructorClassListHtml($session);
             }
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::debug('setInstructorClassListPeriod error: '.$e->getMessage());
         }
+
         return null;
     }
 
@@ -911,10 +984,13 @@ class LegacyPortalClient
      */
     public function extractEmployeeIdFromHome(?string $html): ?int
     {
-        if (!$html) return null;
-        if (preg_match('/employee\.employee_viewprofile&employee_id=(\d+)/', $html, $m)) {
-            return (int)$m[1];
+        if (! $html) {
+            return null;
         }
+        if (preg_match('/employee\.employee_viewprofile&employee_id=(\d+)/', $html, $m)) {
+            return (int) $m[1];
+        }
+
         return null;
     }
 
@@ -927,20 +1003,23 @@ class LegacyPortalClient
         $base = $config['base_url'];
         $cookieHeader = $session['cookie_header'] ?? $this->buildCookieHeader($session['cookies'] ?? []);
         try {
-            $url = $base . '/index.cfm?fa=employee.employee_viewprofile&employee_id=' . $employeeId;
+            $url = $base.'/index.cfm?fa=employee.employee_viewprofile&employee_id='.$employeeId;
             $resp = Http::withHeaders([
                 'User-Agent' => $config['user_agent'],
                 'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Cookie' => $cookieHeader,
-                'Referer' => $base . '/index.cfm?fa=home.index',
+                'Referer' => $base.'/index.cfm?fa=home.index',
             ])->withOptions([
                 'timeout' => $config['timeout'],
                 'allow_redirects' => true,
             ])->get($url);
-            if ($resp->ok()) return $resp->body();
-        } catch (\Throwable $e) {
+            if ($resp->ok()) {
+                return $resp->body();
+            }
+        } catch (Throwable $e) {
             Log::debug('fetchEmployeeProfileHtml error: '.$e->getMessage());
         }
+
         return null;
     }
 
@@ -951,7 +1030,9 @@ class LegacyPortalClient
     public function parseEmployeeProfileMeta(?string $html): array
     {
         $meta = [];
-        if (!$html) return $meta;
+        if (! $html) {
+            return $meta;
+        }
         // Department code (selected option in department_select)
         if (preg_match('/<select[^>]*id="department_select"[\s\S]*?<option value="([A-Z0-9_]+)"selected>/i', $html, $m)) {
             $meta['employee_department_code'] = trim($m[1]);
@@ -960,6 +1041,7 @@ class LegacyPortalClient
         if (preg_match('/<img class="circle" src="([^"]+)"/i', $html, $m2)) {
             $meta['employee_photo_url'] = html_entity_decode($m2[1]);
         }
+
         return $meta;
     }
 
@@ -981,35 +1063,37 @@ class LegacyPortalClient
                 'Sec-Fetch-Site' => 'same-origin',
                 'Sec-Fetch-Mode' => 'cors',
                 'Sec-Fetch-Dest' => 'empty',
-                'Referer' => $base . '/index.cfm?fa=clearance.clearance',
+                'Referer' => $base.'/index.cfm?fa=clearance.clearance',
             ])->withOptions([
                 'timeout' => $config['timeout'],
-            ])->get($base . '/index.cfm', [
+            ])->get($base.'/index.cfm', [
                 'fa' => 'clearance.json_get_clearance_list',
-                'semester_id' => $semesterId
+                'semester_id' => $semesterId,
             ]);
 
-            if (!$response->ok()) {
+            if (! $response->ok()) {
                 Log::error('Failed to fetch clearance data', [
                     'status' => $response->status(),
-                    'semester_id' => $semesterId
+                    'semester_id' => $semesterId,
                 ]);
+
                 return [];
             }
 
             $data = $response->json();
-            
-            if (!is_array($data)) {
+
+            if (! is_array($data)) {
                 Log::warning('Clearance data is not array', [
                     'type' => gettype($data),
-                    'semester_id' => $semesterId
+                    'semester_id' => $semesterId,
                 ]);
+
                 return [];
             }
 
             Log::info('Clearance data fetched successfully', [
                 'semester_id' => $semesterId,
-                'areas_count' => count($data)
+                'areas_count' => count($data),
             ]);
 
             return $data;
@@ -1017,8 +1101,9 @@ class LegacyPortalClient
         } catch (\Exception $e) {
             Log::error('Exception while fetching clearance data', [
                 'error' => $e->getMessage(),
-                'semester_id' => $semesterId
+                'semester_id' => $semesterId,
             ]);
+
             return [];
         }
     }
@@ -1034,7 +1119,7 @@ class LegacyPortalClient
 
         try {
             Log::info('=== FETCHING STUDENT BY SCHOOL ID ===', [
-                'school_id' => $schoolId
+                'school_id' => $schoolId,
             ]);
 
             $response = Http::withHeaders([
@@ -1045,29 +1130,31 @@ class LegacyPortalClient
                 'Sec-Fetch-Site' => 'same-origin',
                 'Sec-Fetch-Mode' => 'cors',
                 'Sec-Fetch-Dest' => 'empty',
-                'Referer' => $base . '/index.cfm?fa=student.student_academic_record_index',
+                'Referer' => $base.'/index.cfm?fa=student.student_academic_record_index',
             ])->withOptions([
                 'timeout' => $config['timeout'],
-            ])->get($base . '/index.cfm', [
+            ])->get($base.'/index.cfm', [
                 'fa' => 'student.json_get_student_by_lastname',
-                'keyword' => $schoolId
+                'keyword' => $schoolId,
             ]);
 
-            if (!$response->ok()) {
+            if (! $response->ok()) {
                 Log::error('Failed to fetch student by school ID', [
                     'status' => $response->status(),
-                    'school_id' => $schoolId
+                    'school_id' => $schoolId,
                 ]);
+
                 return [];
             }
 
             $data = $response->json();
-            
-            if (!is_array($data)) {
+
+            if (! is_array($data)) {
                 Log::warning('Student data is not array', [
                     'type' => gettype($data),
-                    'school_id' => $schoolId
+                    'school_id' => $schoolId,
                 ]);
+
                 return [];
             }
 
@@ -1075,7 +1162,7 @@ class LegacyPortalClient
                 'school_id' => $schoolId,
                 'students_found' => count($data),
                 'student_id' => $data[0]['student_id'] ?? null,
-                'degree_program_id' => $data[0]['degree_program_id'] ?? null
+                'degree_program_id' => $data[0]['degree_program_id'] ?? null,
             ]);
 
             return $data;
@@ -1083,8 +1170,9 @@ class LegacyPortalClient
         } catch (\Exception $e) {
             Log::error('Exception while fetching student by school ID', [
                 'error' => $e->getMessage(),
-                'school_id' => $schoolId
+                'school_id' => $schoolId,
             ]);
+
             return [];
         }
     }
@@ -1096,7 +1184,7 @@ class LegacyPortalClient
     {
         Log::info('=== STARTING COMPREHENSIVE LOGIN DATA SCRAPING ===', [
             'school_id' => $schoolId,
-            'timestamp' => now()
+            'timestamp' => now(),
         ]);
 
         $scrapedData = [
@@ -1108,7 +1196,7 @@ class LegacyPortalClient
             'clearance_data' => [],
             'student_info' => [],
             'all_semester_grades' => [],
-            'errors' => []
+            'errors' => [],
         ];
 
         try {
@@ -1118,18 +1206,18 @@ class LegacyPortalClient
                 $academicHtml = $this->fetchAcademicRecordsHtml($legacySession);
                 $parsed = $this->parseAcademicRecords($academicHtml);
                 $init = $this->extractAcademicInitParams($academicHtml);
-                
+
                 $scrapedData['academic_records'] = $parsed;
                 $scrapedData['semesters'] = $parsed['semesters'] ?? [];
                 $scrapedData['current_semester_id'] = $parsed['current_semester_id'] ?? null;
                 $scrapedData['init_params'] = $init;
-                
+
                 Log::info('Academic records scraped successfully', [
                     'semesters_found' => count($scrapedData['semesters']),
-                    'current_semester' => $scrapedData['current_semester_id']
+                    'current_semester' => $scrapedData['current_semester_id'],
                 ]);
             } catch (\Exception $e) {
-                $error = 'Failed to fetch academic records: ' . $e->getMessage();
+                $error = 'Failed to fetch academic records: '.$e->getMessage();
                 $scrapedData['errors'][] = $error;
                 Log::error($error);
             }
@@ -1140,12 +1228,12 @@ class LegacyPortalClient
                 try {
                     $studentInfo = $this->fetchStudentBySchoolId($legacySession, $schoolId);
                     $scrapedData['student_info'] = $studentInfo;
-                    
+
                     Log::info('Student information scraped successfully', [
-                        'student_records_found' => count($studentInfo)
+                        'student_records_found' => count($studentInfo),
                     ]);
                 } catch (\Exception $e) {
-                    $error = 'Failed to fetch student info: ' . $e->getMessage();
+                    $error = 'Failed to fetch student info: '.$e->getMessage();
                     $scrapedData['errors'][] = $error;
                     Log::error($error);
                 }
@@ -1154,9 +1242,9 @@ class LegacyPortalClient
             // 3. Fetch clearance data for all available semesters
             Log::info('Step 3: Fetching clearance data for all semesters');
             $scrapedData['clearance_data'] = [];
-            
+
             foreach ($scrapedData['semesters'] as $semester) {
-                $semesterId = (int)$semester['id'];
+                $semesterId = (int) $semester['id'];
                 try {
                     $clearanceData = $this->fetchClearanceData($legacySession, $semesterId);
                     $scrapedData['clearance_data'][$semesterId] = [
@@ -1164,15 +1252,15 @@ class LegacyPortalClient
                         'semester_label' => $semester['label'],
                         'data' => $clearanceData,
                         'areas_count' => count($clearanceData),
-                        'timestamp' => now()
+                        'timestamp' => now(),
                     ];
-                    
+
                     Log::info('Clearance data scraped for semester', [
                         'semester_id' => $semesterId,
-                        'areas_found' => count($clearanceData)
+                        'areas_found' => count($clearanceData),
                     ]);
                 } catch (\Exception $e) {
-                    $error = "Failed to fetch clearance for semester {$semesterId}: " . $e->getMessage();
+                    $error = "Failed to fetch clearance for semester {$semesterId}: ".$e->getMessage();
                     $scrapedData['errors'][] = $error;
                     Log::error($error);
                 }
@@ -1182,7 +1270,7 @@ class LegacyPortalClient
             if ($init) {
                 Log::info('Step 4: Fetching grades for all semesters');
                 $scrapedData['all_semester_grades'] = [];
-                
+
                 foreach ($scrapedData['semesters'] as $semester) {
                     $semesterId = $semester['id'];
                     try {
@@ -1192,23 +1280,23 @@ class LegacyPortalClient
                             $init['educational_level_id'],
                             $semesterId
                         );
-                        
-                        $normalized = array_map(fn($r) => $this->normalizeAcademicRecordRow($r), $rawJson);
-                        
+
+                        $normalized = array_map(fn ($r) => $this->normalizeAcademicRecordRow($r), $rawJson);
+
                         $scrapedData['all_semester_grades'][$semesterId] = [
                             'semester_id' => $semesterId,
                             'semester_label' => $semester['label'],
                             'grades' => $normalized,
                             'records_count' => count($normalized),
-                            'timestamp' => now()
+                            'timestamp' => now(),
                         ];
-                        
+
                         Log::info('Grades scraped for semester', [
                             'semester_id' => $semesterId,
-                            'records_found' => count($normalized)
+                            'records_found' => count($normalized),
                         ]);
                     } catch (\Exception $e) {
-                        $error = "Failed to fetch grades for semester {$semesterId}: " . $e->getMessage();
+                        $error = "Failed to fetch grades for semester {$semesterId}: ".$e->getMessage();
                         $scrapedData['errors'][] = $error;
                         Log::error($error);
                     }
@@ -1220,11 +1308,11 @@ class LegacyPortalClient
                 'semesters_processed' => count($scrapedData['semesters']),
                 'clearance_semesters' => count($scrapedData['clearance_data']),
                 'grade_semesters' => count($scrapedData['all_semester_grades']),
-                'errors_count' => count($scrapedData['errors'])
+                'errors_count' => count($scrapedData['errors']),
             ]);
 
         } catch (\Exception $e) {
-            $error = 'Critical error during data scraping: ' . $e->getMessage();
+            $error = 'Critical error during data scraping: '.$e->getMessage();
             $scrapedData['errors'][] = $error;
             $scrapedData['success'] = false;
             Log::error($error, ['trace' => $e->getTraceAsString()]);
@@ -1241,21 +1329,22 @@ class LegacyPortalClient
         try {
             $cacheKey = "scraped_data_user_{$userId}";
             $cacheTime = 3600; // Cache for 1 hour
-            
+
             Cache::put($cacheKey, $scrapedData, $cacheTime);
-            
+
             Log::info('Scraped data cached successfully', [
                 'user_id' => $userId,
                 'cache_key' => $cacheKey,
-                'cache_duration' => $cacheTime
+                'cache_duration' => $cacheTime,
             ]);
-            
+
             return true;
         } catch (\Exception $e) {
             Log::error('Failed to cache scraped data', [
                 'user_id' => $userId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
+
             return false;
         }
     }
@@ -1268,20 +1357,21 @@ class LegacyPortalClient
         try {
             $cacheKey = "scraped_data_user_{$userId}";
             $data = Cache::get($cacheKey);
-            
+
             if ($data) {
                 Log::info('Retrieved cached scraped data', [
                     'user_id' => $userId,
-                    'cache_key' => $cacheKey
+                    'cache_key' => $cacheKey,
                 ]);
             }
-            
+
             return $data;
         } catch (\Exception $e) {
             Log::error('Failed to get cached scraped data', [
                 'user_id' => $userId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
+
             return null;
         }
     }
@@ -1293,23 +1383,23 @@ class LegacyPortalClient
     {
         try {
             if (isset($studentInfo['student_id']) && isset($studentInfo['degree_program_id'])) {
-                \App\Models\LegacyStudentInfo::updateOrCreate([
+                LegacyStudentInfo::updateOrCreate([
                     'user_id' => $user->id,
                 ], [
                     'student_id' => $studentInfo['student_id'],
                     'degree_program_id' => $studentInfo['degree_program_id'],
                 ]);
-                
+
                 Log::info('Saved student info to database', [
                     'user_id' => $user->id,
                     'student_id' => $studentInfo['student_id'],
-                    'degree_program_id' => $studentInfo['degree_program_id']
+                    'degree_program_id' => $studentInfo['degree_program_id'],
                 ]);
             }
         } catch (\Exception $e) {
             Log::error('Failed to save student info to database', [
                 'user_id' => $user->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
         }
     }
@@ -1322,7 +1412,7 @@ class LegacyPortalClient
     {
         try {
             foreach ($records as $rec) {
-                \App\Models\LegacyAcademicRecord::updateOrCreate([
+                LegacyAcademicRecord::updateOrCreate([
                     'user_id' => $user->id,
                     'semester_id' => $semesterId,
                     'course_code' => $rec['code'] ?? $rec['course'] ?? null,
@@ -1339,17 +1429,17 @@ class LegacyPortalClient
                     'is_complete' => $this->isCourseComplete($rec),
                 ]);
             }
-            
+
             Log::info('Saved academic records to database', [
                 'user_id' => $user->id,
                 'semester_id' => $semesterId,
-                'records_count' => count($records)
+                'records_count' => count($records),
             ]);
         } catch (\Exception $e) {
             Log::error('Failed to save academic records to database', [
                 'user_id' => $user->id,
                 'semester_id' => $semesterId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
         }
     }
@@ -1359,9 +1449,12 @@ class LegacyPortalClient
      */
     protected function isCourseComplete($rec)
     {
-        foreach (['prelim','midterm','finals'] as $g) {
-            if (isset($rec[$g]) && $rec[$g] == 40) return false;
+        foreach (['prelim', 'midterm', 'finals'] as $g) {
+            if (isset($rec[$g]) && $rec[$g] == 40) {
+                return false;
+            }
         }
+
         return true;
     }
 
@@ -1382,7 +1475,7 @@ class LegacyPortalClient
                         }
                     }
                 }
-                
+
                 // Special handling for Cashier
                 if (($area['label'] ?? '') === 'Cashier') {
                     foreach ($area['requirements'] ?? [] as $req) {
@@ -1392,8 +1485,8 @@ class LegacyPortalClient
                         }
                     }
                 }
-                
-                \App\Models\LegacyClearanceStatus::updateOrCreate([
+
+                LegacyClearanceStatus::updateOrCreate([
                     'user_id' => $user->id,
                     'semester_id' => $semesterId,
                     'area' => $area['label'] ?? null,
@@ -1402,17 +1495,17 @@ class LegacyPortalClient
                     'details' => json_encode($area),
                 ]);
             }
-            
+
             Log::info('Saved clearance status to database', [
                 'user_id' => $user->id,
                 'semester_id' => $semesterId,
-                'areas_count' => count($clearanceAreas)
+                'areas_count' => count($clearanceAreas),
             ]);
         } catch (\Exception $e) {
             Log::error('Failed to save clearance status to database', [
                 'user_id' => $user->id,
                 'semester_id' => $semesterId,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
         }
     }
@@ -1424,37 +1517,37 @@ class LegacyPortalClient
     {
         Log::info('=== PERSISTING ALL SCRAPED DATA TO DATABASE ===', [
             'user_id' => $user->id,
-            'timestamp' => now()
+            'timestamp' => now(),
         ]);
-        
+
         // Save student info
-        if (!empty($scrapedData['student_info'][0])) {
+        if (! empty($scrapedData['student_info'][0])) {
             $this->saveStudentInfoToDb($user, $scrapedData['student_info'][0]);
         }
-        
+
         // Save academic records and grades for all semesters
-        if (!empty($scrapedData['all_semester_grades'])) {
+        if (! empty($scrapedData['all_semester_grades'])) {
             foreach ($scrapedData['all_semester_grades'] as $semesterId => $semData) {
                 $this->saveAcademicRecordsToDb($user, $semesterId, $semData['grades'] ?? []);
             }
         }
-        
+
         // Save clearance data for all semesters
-        if (!empty($scrapedData['clearance_data'])) {
+        if (! empty($scrapedData['clearance_data'])) {
             foreach ($scrapedData['clearance_data'] as $semesterId => $clearance) {
                 $this->saveClearanceStatusToDb($user, $semesterId, $clearance['data'] ?? []);
             }
         }
-        
+
         Log::info('=== FINISHED PERSISTING ALL SCRAPED DATA ===', [
-            'user_id' => $user->id
+            'user_id' => $user->id,
         ]);
     }
 
     /**
      * Fetch student clearance data by last name keyword
      * Returns array of clearance records with account_id, student_number, etc.
-     * 
+     *
      * Endpoint: index.cfm?fa=clearance.json_get_student_clearance_by_keyword&keyword={LASTNAME}
      * Response: [{"account_id": 119597, "student_number": "230000001047", "firstname": "GEOFFREY", ...}]
      */
@@ -1463,14 +1556,14 @@ class LegacyPortalClient
         $config = config('legacy');
         $base = $config['base_url'];
         $cookieHeader = $this->buildCookieHeader($session['cookies'] ?? []);
-        
-        $url = $base . '/index.cfm?fa=clearance.json_get_student_clearance_by_keyword&keyword=' . urlencode(strtoupper($keyword));
-        
+
+        $url = $base.'/index.cfm?fa=clearance.json_get_student_clearance_by_keyword&keyword='.urlencode(strtoupper($keyword));
+
         Log::info('Fetching clearance by keyword', [
             'keyword' => $keyword,
-            'url' => $url
+            'url' => $url,
         ]);
-        
+
         try {
             $response = Http::withHeaders([
                 'User-Agent' => $config['user_agent'],
@@ -1480,37 +1573,40 @@ class LegacyPortalClient
             ])->withOptions([
                 'timeout' => $config['timeout'],
             ])->get($url);
-            
-            if (!$response->ok()) {
+
+            if (! $response->ok()) {
                 Log::warning('Clearance API request failed', [
                     'status' => $response->status(),
-                    'keyword' => $keyword
+                    'keyword' => $keyword,
                 ]);
+
                 return null;
             }
-            
+
             $data = json_decode($response->body(), true);
-            
-            if (!is_array($data)) {
+
+            if (! is_array($data)) {
                 Log::warning('Clearance API returned non-array', [
                     'keyword' => $keyword,
-                    'body' => $response->body()
+                    'body' => $response->body(),
                 ]);
+
                 return null;
             }
-            
+
             Log::info('Clearance API response received', [
                 'keyword' => $keyword,
-                'records_count' => count($data)
+                'records_count' => count($data),
             ]);
-            
+
             return $data;
-            
-        } catch (\Throwable $e) {
+
+        } catch (Throwable $e) {
             Log::error('Failed to fetch clearance by keyword', [
                 'keyword' => $keyword,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
+
             return null;
         }
     }

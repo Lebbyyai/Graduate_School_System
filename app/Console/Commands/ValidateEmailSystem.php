@@ -2,15 +2,14 @@
 
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
 use App\Models\User;
-use App\Models\DefenseRequest;
+use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 
 class ValidateEmailSystem extends Command
 {
     protected $signature = 'email:validate-system';
+
     protected $description = 'Comprehensive validation of the entire email notification system';
 
     public function handle()
@@ -42,9 +41,9 @@ class ValidateEmailSystem extends Command
         }
         $this->newLine();
 
-        // Check 3: Faculty Data
-        $this->line('3️⃣  Validating faculty data...');
-        $result = $this->checkFaculty();
+        // Check 3: Adviser Data
+        $this->line('3️⃣  Validating adviser data...');
+        $result = $this->checkAdviser();
         if ($result === true) {
             $passed++;
         } elseif ($result === 'warning') {
@@ -91,9 +90,9 @@ class ValidateEmailSystem extends Command
         $this->table(
             ['Status', 'Count', 'Percentage'],
             [
-                ['✅ Passed', $passed, round(($passed / $total) * 100, 1) . '%'],
-                ['⚠️  Warnings', $warnings, round(($warnings / $total) * 100, 1) . '%'],
-                ['❌ Failed', $failed, round(($failed / $total) * 100, 1) . '%'],
+                ['✅ Passed', $passed, round(($passed / $total) * 100, 1).'%'],
+                ['⚠️  Warnings', $warnings, round(($warnings / $total) * 100, 1).'%'],
+                ['❌ Failed', $failed, round(($failed / $total) * 100, 1).'%'],
             ]
         );
 
@@ -130,7 +129,7 @@ class ValidateEmailSystem extends Command
 
         foreach ($required as $key => $expectedValue) {
             $value = env($key);
-            
+
             if ($expectedValue !== null) {
                 if ($value === $expectedValue) {
                     $this->line("   ✅ {$key} = {$value}");
@@ -141,7 +140,7 @@ class ValidateEmailSystem extends Command
             } else {
                 if ($value) {
                     if ($key === 'RESEND_API_KEY') {
-                        $preview = substr($value, 0, 7) . '...' . substr($value, -4);
+                        $preview = substr($value, 0, 7).'...'.substr($value, -4);
                         $this->line("   ✅ {$key} = {$preview}");
                     } else {
                         $this->line("   ✅ {$key} = {$value}");
@@ -174,33 +173,36 @@ class ValidateEmailSystem extends Command
         return $allGood;
     }
 
-    private function checkFaculty()
+    private function checkAdviser()
     {
-        $faculty = User::where('role', 'Faculty')->get();
-        
-        if ($faculty->isEmpty()) {
-            $this->error('   ❌ No faculty members found in database!');
+        $adviser = User::where('role', 'Adviser')->get();
+
+        if ($adviser->isEmpty()) {
+            $this->error('   ❌ No advisers found in database!');
+
             return false;
         }
 
-        $this->line("   ✅ Found {$faculty->count()} faculty members");
+        $this->line("   ✅ Found {$adviser->count()} advisers");
 
-        $noEmail = $faculty->filter(fn($f) => !$f->email)->count();
+        $noEmail = $adviser->filter(fn ($f) => ! $f->email)->count();
         $hasIssues = false;
 
-        foreach ($faculty as $f) {
-            if (!$f->email) {
+        foreach ($adviser as $f) {
+            if (! $f->email) {
                 $this->warn("   ⚠️  {$f->full_name} has no email address");
                 $hasIssues = true;
             }
         }
 
         if ($hasIssues) {
-            $this->warn("   💡 Run: php artisan faculty:validate-names --fix");
+            $this->warn('   💡 Run: php artisan adviser:validate-names --fix');
+
             return 'warning';
         }
 
-        $this->line("   ✅ All faculty members have email addresses");
+        $this->line('   ✅ All advisers have email addresses');
+
         return true;
     }
 
@@ -238,7 +240,7 @@ class ValidateEmailSystem extends Command
             $jobCount = DB::table('jobs')->count();
             $this->line("   ✅ Jobs table accessible ({$jobCount} pending)");
         } catch (\Exception $e) {
-            $this->error("   ❌ Cannot access jobs table!");
+            $this->error('   ❌ Cannot access jobs table!');
             $allGood = false;
         }
 
@@ -247,12 +249,12 @@ class ValidateEmailSystem extends Command
             $failedCount = DB::table('failed_jobs')->count();
             if ($failedCount > 0) {
                 $this->warn("   ⚠️  {$failedCount} failed jobs found");
-                $this->warn("   💡 Run: php artisan queue:retry all");
+                $this->warn('   💡 Run: php artisan queue:retry all');
             } else {
-                $this->line("   ✅ No failed jobs");
+                $this->line('   ✅ No failed jobs');
             }
         } catch (\Exception $e) {
-            $this->error("   ❌ Cannot access failed_jobs table!");
+            $this->error('   ❌ Cannot access failed_jobs table!');
             $allGood = false;
         }
 
@@ -261,19 +263,20 @@ class ValidateEmailSystem extends Command
 
     private function testNameMatching(): bool
     {
-        $faculty = User::where('role', 'Faculty')->first();
-        
-        if (!$faculty) {
-            $this->warn('   ⚠️  Cannot test - no faculty members available');
+        $adviser = User::where('role', 'Adviser')->first();
+
+        if (! $adviser) {
+            $this->warn('   ⚠️  Cannot test - no advisers available');
+
             return true; // Don't fail the test
         }
 
         $allGood = true;
 
         // Test 1: Full name with middle
-        $fullName = $faculty->full_name;
-        $found = User::findByFullName($fullName, 'Faculty')->first();
-        if ($found && $found->id === $faculty->id) {
+        $fullName = $adviser->full_name;
+        $found = User::findByFullName($fullName, 'Adviser')->first();
+        if ($found && $found->id === $adviser->id) {
             $this->line("   ✅ Full name match: '{$fullName}'");
         } else {
             $this->error("   ❌ Failed to match full name: '{$fullName}'");
@@ -281,10 +284,10 @@ class ValidateEmailSystem extends Command
         }
 
         // Test 2: Name without middle
-        if ($faculty->middle_name) {
-            $nameWithoutMiddle = $faculty->first_name . ' ' . $faculty->last_name;
-            $found = User::findByFullName($nameWithoutMiddle, 'Faculty')->first();
-            if ($found && $found->id === $faculty->id) {
+        if ($adviser->middle_name) {
+            $nameWithoutMiddle = $adviser->first_name.' '.$adviser->last_name;
+            $found = User::findByFullName($nameWithoutMiddle, 'Adviser')->first();
+            if ($found && $found->id === $adviser->id) {
                 $this->line("   ✅ Name without middle: '{$nameWithoutMiddle}'");
             } else {
                 $this->warn("   ⚠️  Could not match without middle name: '{$nameWithoutMiddle}'");
@@ -293,8 +296,8 @@ class ValidateEmailSystem extends Command
 
         // Test 3: Case insensitive
         $lowercase = strtolower($fullName);
-        $found = User::findByFullName($lowercase, 'Faculty')->first();
-        if ($found && $found->id === $faculty->id) {
+        $found = User::findByFullName($lowercase, 'Adviser')->first();
+        if ($found && $found->id === $adviser->id) {
             $this->line("   ✅ Case insensitive match: '{$lowercase}'");
         } else {
             $this->error("   ❌ Failed case insensitive match: '{$lowercase}'");
